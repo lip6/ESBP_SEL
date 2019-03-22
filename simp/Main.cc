@@ -9,19 +9,19 @@
                                 Labri - Univ. Bordeaux, France
 
 Glucose sources are based on MiniSat (see below MiniSat copyrights). Permissions and copyrights of
-Glucose (sources until 2013, Glucose 3.0, single core) are exactly the same as Minisat on which it 
+Glucose (sources until 2013, Glucose 3.0, single core) are exactly the same as Minisat on which it
 is based on. (see below).
 
 Glucose-Syrup sources are based on another copyright. Permissions and copyrights for the parallel
 version of Glucose-Syrup (the "Software") are granted, free of charge, to deal with the Software
 without restriction, including the rights to use, copy, modify, merge, publish, distribute,
-sublicence, and/or sell copies of the Software, and to permit persons to whom the Software is 
+sublicence, and/or sell copies of the Software, and to permit persons to whom the Software is
 furnished to do so, subject to the following conditions:
 
 - The above and below copyrights notices and this permission notice shall be included in all
 copies or substantial portions of the Software;
 - The parallel version of Glucose (all files modified since Glucose 3.0 releases, 2013) cannot
-be used in any competitive event (sat competitions/evaluations) without the express permission of 
+be used in any competitive event (sat competitions/evaluations) without the express permission of
 the authors (Gilles Audemard / Laurent Simon). This is also the case for any competitive event
 using Glucose Parallel as an embedded SAT engine (single core or not).
 
@@ -53,11 +53,16 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 #include <zlib.h>
 #include <sys/resource.h>
 
+#include <memory>
+
 #include "utils/System.h"
 #include "utils/ParseUtils.h"
 #include "utils/Options.h"
 #include "core/Dimacs.h"
+#include "core/GlucoseLiteralAdapter.h"
+#include "cosy/SymmetryController.h"
 #include "simp/SimpSolver.h"
+
 
 #include <string>
 
@@ -89,9 +94,11 @@ void printStats(Solver& solver)
     printf("c symselprops           : %-12" PRIu64"   (%.0f /sec)\n", solver.symselprops    , solver.symselprops /cpu_time);
     printf("c conflict literals     : %-12" PRIu64"   (%4.2f %% deleted)\n", solver.tot_literals, (solver.max_literals - solver.tot_literals)*100 / (double)solver.max_literals);
     printf("c nb reduced Clauses    : %" PRIu64"\n",solver.nbReducedClauses);
-    
     if (mem_used != 0) printf("Memory used           : %.2f MB\n", mem_used);
     printf("c CPU time              : %g s\n", cpu_time);
+
+    if (solver.symmetry != nullptr)
+        solver.symmetry->printStats();
 }
 
 
@@ -120,10 +127,10 @@ int main(int argc, char** argv)
     try {
       printf("c\nc This is glucose 4.0 --  based on MiniSAT (Many thanks to MiniSAT team)\nc\n");
 
-      
+
       setUsageHelp("c USAGE: %s [options] <input-file> <result-output-file>\n\n  where input may be either in plain or gzipped DIMACS.\n");
-        
-        
+
+
 #if defined(__linux__)
         fpu_control_t oldcw, newcw;
         _FPU_GETCW(oldcw); newcw = (oldcw & ~_FPU_EXTENDED) | _FPU_DOUBLE; _FPU_SETCW(newcw);
@@ -144,9 +151,9 @@ int main(int argc, char** argv)
          StringOption  opt_certified_file      (_certified, "certified-output",    "Certified UNSAT output file", "NULL");
 
          BoolOption   linear_sym_gens   ("MAIN", "linear-sym-gens", "Use a linear number of generators for row interchangeability.", false);
-         
+
         parseOptions(argc, argv, true);
-        
+
         SimpSolver  S;
         double      initial_time = cpuTime();
 
@@ -156,13 +163,13 @@ int main(int argc, char** argv)
         S.verbosity = verb;
         S.verbEveryConflicts = vv;
 	S.showModel = mod;
-        
+
         S.certifiedUNSAT = opt_certified;
         if(S.certifiedUNSAT) {
             if(!strcmp(opt_certified_file,"NULL")) {
             S.certifiedOutput =  fopen("/dev/stdout", "wb");
             } else {
-                S.certifiedOutput =  fopen(opt_certified_file, "wb");	    
+                S.certifiedOutput =  fopen(opt_certified_file, "wb");
             }
             fprintf(S.certifiedOutput,"o proof DRUP\n");
         }
@@ -194,7 +201,7 @@ int main(int argc, char** argv)
                 if (setrlimit(RLIMIT_AS, &rl) == -1)
                     printf("c WARNING! Could not set resource limit: Virtual memory.\n");
             } }
-        
+
         if (argc == 1)
             printf("c Reading from standard input... Use '--help' for help.\n");
 
@@ -206,7 +213,23 @@ int main(int argc, char** argv)
         parse_DIMACS(in, S);
         gzclose(in);
 
-        std::string symloc = cnfloc+".sym";
+        std::unique_ptr<cosy::LiteralAdapter<Glucose::Lit>> adapter
+            (new GlucoseLiteralAdapter());
+
+        std::string cnf_file = std::string(argv[1]);
+        std::string symloc = cnfloc + ".sym";
+
+        // S.symmetry = std::unique_ptr<cosy::SymmetryController<Glucose::Lit>>
+        //     (new cosy::SymmetryController<Glucose::Lit>
+        //      (cnf_file,
+        //       cosy::SymmetryFinder::Automorphism::BLISS,
+        //       std::move(adapter)));
+
+        S.symmetry = std::unique_ptr<cosy::SymmetryController<Glucose::Lit>>
+            (new cosy::SymmetryController<Glucose::Lit>
+             (cnf_file, symloc, cosy::SymmetryReader::BREAKID_SYM,
+              std::move(adapter)));
+
         gzFile in_sym = (argc == 1) ? gzdopen(0, "rb") : gzopen(symloc.c_str(), "rb");
 
         if (in_sym!=NULL){
@@ -215,18 +238,18 @@ int main(int argc, char** argv)
         }else{
             printf("c Did not find .sym symmetry file. Assuming no symmetry is provided.\n");
         }
-        
+
       if (S.verbosity > 0){
             printf("c ========================================[ Problem Statistics ]===========================================\n");
             printf("c |                                                                                                       |\n"); }
-        
+
         FILE* res = (argc >= 3) ? fopen(argv[argc-1], "wb") : NULL;
 
        if (S.verbosity > 0){
             printf("c |  Number of variables:  %12d                                                                   |\n", S.nVars());
             printf("c |  Number of clauses:    %12d                                                                   |\n", S.nClauses());
             printf("c |  Number of sym generators: %8d                                                                   |\n", S.nGenerators()); }
-        
+
         double parsed_time = cpuTime();
         if (S.verbosity > 0){
             printf("c |  Parse time:           %12.2f s                                                                 |\n", parsed_time - initial_time);
@@ -255,7 +278,7 @@ int main(int argc, char** argv)
                printf("Solved by simplification\n");
                 printStats(S);
                 printf("\n"); }
-            printf("s UNSATISFIABLE\n");        
+            printf("s UNSATISFIABLE\n");
             exit(20);
         }
 
@@ -270,7 +293,7 @@ int main(int argc, char** argv)
 
         vec<Lit> dummy;
         lbool ret = S.solveLimited(dummy);
-        
+
         if (S.verbosity > 0){
             printStats(S);
             printf("\n"); }

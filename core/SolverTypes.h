@@ -9,19 +9,19 @@
                                 Labri - Univ. Bordeaux, France
 
 Glucose sources are based on MiniSat (see below MiniSat copyrights). Permissions and copyrights of
-Glucose (sources until 2013, Glucose 3.0, single core) are exactly the same as Minisat on which it 
+Glucose (sources until 2013, Glucose 3.0, single core) are exactly the same as Minisat on which it
 is based on. (see below).
 
 Glucose-Syrup sources are based on another copyright. Permissions and copyrights for the parallel
 version of Glucose-Syrup (the "Software") are granted, free of charge, to deal with the Software
 without restriction, including the rights to use, copy, modify, merge, publish, distribute,
-sublicence, and/or sell copies of the Software, and to permit persons to whom the Software is 
+sublicence, and/or sell copies of the Software, and to permit persons to whom the Software is
 furnished to do so, subject to the following conditions:
 
 - The above and below copyrights notices and this permission notice shall be included in all
 copies or substantial portions of the Software;
 - The parallel version of Glucose (all files modified since Glucose 3.0 releases, 2013) cannot
-be used in any competitive event (sat competitions/evaluations) without the express permission of 
+be used in any competitive event (sat competitions/evaluations) without the express permission of
 the authors (Gilles Audemard / Laurent Simon). This is also the case for any competitive event
 using Glucose Parallel as an embedded SAT engine (single core or not).
 
@@ -95,9 +95,9 @@ inline  bool sign      (Lit p)              { return p.x & 1; }
 inline  int  var       (Lit p)              { return p.x >> 1; }
 
 // Mapping Literals to and from compact integers suitable for array indexing:
-inline  int  toInt     (Var v)              { return v; } 
-inline  int  toInt     (Lit p)              { return p.x; } 
-inline  Lit  toLit     (int i)              { Lit p; p.x = i; return p; } 
+inline  int  toInt     (Var v)              { return v; }
+inline  int  toInt     (Lit p)              { return p.x; }
+inline  Lit  toLit     (int i)              { Lit p; p.x = i; return p; }
 
 //const Lit lit_Undef = mkLit(var_Undef, false);  // }- Useful special constants.
 //const Lit lit_Error = mkLit(var_Undef, true );  // }
@@ -110,7 +110,7 @@ const Lit lit_Error = { -1 };  // }
 // Lifted booleans:
 //
 // NOTE: this implementation is optimized for the case when comparisons between values are mostly
-//       between one variable and one constant. Some care had to be taken to make sure that gcc 
+//       between one variable and one constant. Some care had to be taken to make sure that gcc
 //       does enough constant propagation to produce sensible code, and this appears to be somewhat
 //       fragile unfortunately.
 
@@ -131,7 +131,7 @@ public:
     bool  operator != (lbool b) const { return !(*this == b); }
     lbool operator ^  (bool  b) const { return lbool((uint8_t)(value^(uint8_t)b)); }
 
-    lbool operator && (lbool b) const { 
+    lbool operator && (lbool b) const {
         uint8_t sel = (this->value << 1) | (b.value << 3);
         uint8_t v   = (0xF7F755F4 >> sel) & 3;
         return lbool(v); }
@@ -154,15 +154,16 @@ class Clause;
 typedef RegionAllocator<uint32_t>::Ref CRef;
 
 #define BITS_LBD 13
-#define BITS_SIZEWITHOUTSEL 19
+#define BITS_SIZEWITHOUTSEL 18
 #define BITS_REALSIZE 21
 class Clause {
     struct {
       unsigned mark       : 2;
       unsigned learnt     : 1;
+      unsigned symmetry   : 1;
       unsigned szWithoutSelectors : BITS_SIZEWITHOUTSEL;
       unsigned canbedel   : 1;
-      unsigned extra_size : 2; // extra size (end of 32bits) 0..3       
+      unsigned extra_size : 2; // extra size (end of 32bits) 0..3
       unsigned size       : BITS_REALSIZE;
       unsigned seen       : 1;
       unsigned reloced    : 1;
@@ -177,29 +178,30 @@ class Clause {
 
     // NOTE: This constructor cannot be used directly (doesn't allocate enough memory).
     template<class V>
-    Clause(const V& ps, int _extra_size, bool learnt) {
+        Clause(const V& ps, int _extra_size, bool learnt, bool symmetry) {
 	assert(_extra_size < (1<<2));
         header.mark      = 0;
         header.learnt    = learnt;
+        header.symmetry  = symmetry;
         header.extra_size = _extra_size;
         header.reloced   = 0;
         header.size      = ps.size();
 	header.lbd = 0;
 	header.canbedel = 1;
-	header.exported = 0; 
+	header.exported = 0;
 	header.oneWatched = 0;
 	header.seen = 0;
-        for (int i = 0; i < ps.size(); i++) 
+        for (int i = 0; i < ps.size(); i++)
             data[i].lit = ps[i];
-	
+
         if (header.extra_size > 0){
-	  if (header.learnt) 
-                data[header.size].act = 0; 
-            else 
+	  if (header.learnt)
+                data[header.size].act = 0;
+            else
                 calcAbstraction();
 	  if (header.extra_size > 1) {
 	      data[header.size+1].abs = 0; // learntFrom
-	  }	      
+	  }
 	}
     }
 
@@ -212,7 +214,7 @@ public:
         data[header.size].abs = abstraction;  }
 
     int          size        ()      const   { return header.size; }
-    void         shrink      (int i)         { assert(i <= size()); 
+    void         shrink      (int i)         { assert(i <= size());
 						if (header.extra_size > 0) {
 						    data[header.size-i] = data[header.size];
 						    if (header.extra_size > 1) { // Special case for imported clauses
@@ -222,6 +224,8 @@ public:
     header.size -= i; }
     void         pop         ()              { shrink(1); }
     bool         learnt      ()      const   { return header.learnt; }
+    bool         symmetry    ()      const   { return header.symmetry; }
+
     bool         has_extra   ()      const   { return header.extra_size > 0; }
     uint32_t     mark        ()      const   { return header.mark; }
     void         mark        (uint32_t m)    { header.mark = m; }
@@ -247,7 +251,7 @@ public:
 
     Lit          subsumes    (const Clause& other) const;
     void         strengthen  (Lit p);
-    void         setLBD(int i)  {if (i < (1<<(BITS_LBD-1))) header.lbd = i; else header.lbd = (1<<(BITS_LBD-1));} 
+    void         setLBD(int i)  {if (i < (1<<(BITS_LBD-1))) header.lbd = i; else header.lbd = (1<<(BITS_LBD-1));}
     // unsigned int&       lbd    ()              { return header.lbd; }
     unsigned int        lbd    () const        { return header.lbd; }
     void setCanBeDel(bool b) {header.canbedel = b;}
@@ -285,15 +289,15 @@ class ClauseAllocator : public RegionAllocator<uint32_t>
         RegionAllocator<uint32_t>::moveTo(to); }
 
     template<class Lits>
-    CRef alloc(const Lits& ps, bool learnt = false, bool imported = false)
+        CRef alloc(const Lits& ps, bool learnt = false, bool imported = false, bool symmetry = false)
     {
         assert(sizeof(Lit)      == sizeof(uint32_t));
         assert(sizeof(float)    == sizeof(uint32_t));
-	
+
         bool use_extra = learnt | extra_clause_field;
         int extra_size = imported?3:(use_extra?1:0);
         CRef cid = RegionAllocator<uint32_t>::alloc(clauseWord32Size(ps.size(), extra_size));
-        new (lea(cid)) Clause(ps, extra_size, learnt);
+        new (lea(cid)) Clause(ps, extra_size, learnt, symmetry);
 
         return cid;
     }
@@ -314,13 +318,15 @@ class ClauseAllocator : public RegionAllocator<uint32_t>
     void reloc(CRef& cr, ClauseAllocator& to)
     {
         Clause& c = operator[](cr);
-        
+
         if (c.reloced()) { cr = c.relocation(); return; }
-        
-        cr = to.alloc(c, c.learnt(), c.wasImported());
+
+        cr = to.alloc(c, c.learnt(), c.wasImported(), c.symmetry());
         c.relocate(cr);
-        
-        // Copy extra data-fields: 
+
+        if (c.symmetry())
+            assert(to[cr].symmetry());
+        // Copy extra data-fields:
         // (This could be cleaned-up. Generalize Clause-constructor to be applicable here instead?)
         to[cr].mark(c.mark());
         if (to[cr].learnt())        {
@@ -353,7 +359,7 @@ class OccLists
 
  public:
     OccLists(const Deleted& d) : deleted(d) {}
-    
+
     void  init      (const Idx& idx){ occs.growTo(toInt(idx)+1); dirty.growTo(toInt(idx)+1, 0); }
     // Vec&  operator[](const Idx& idx){ return occs[toInt(idx)]; }
     Vec&  operator[](const Idx& idx){ return occs[toInt(idx)]; }
@@ -361,7 +367,7 @@ class OccLists
 
     void  cleanAll  ();
     void copyTo(OccLists &copy) const {
-	
+
 	copy.occs.growTo(occs.size());
 	for(int i = 0;i<occs.size();i++)
 	    occs[i].memCopyTo(copy.occs[i]);
@@ -421,13 +427,13 @@ class CMap
 
     typedef Map<CRef, T, CRefHash> HashTable;
     HashTable map;
-        
+
  public:
     // Size-operations:
     void     clear       ()                           { map.clear(); }
     int      size        ()                const      { return map.elems(); }
 
-    
+
     // Insert/Remove/Test mapping:
     void     insert      (CRef cr, const T& t){ map.insert(cr, t); }
     void     growTo      (CRef cr, const T& t){ map.insert(cr, t); } // NOTE: for compatibility
@@ -454,11 +460,11 @@ class CMap
 /*_________________________________________________________________________________________________
 |
 |  subsumes : (other : const Clause&)  ->  Lit
-|  
+|
 |  Description:
 |       Checks if clause subsumes 'other', and at the same time, if it can be used to simplify 'other'
 |       by subsumption resolution.
-|  
+|
 |    Result:
 |       lit_Error  - No subsumption or simplification
 |       lit_Undef  - Clause subsumes 'other'
@@ -577,5 +583,5 @@ public:
 
 }
 
- 
+
 #endif
