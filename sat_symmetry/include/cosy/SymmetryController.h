@@ -111,9 +111,13 @@ inline SymmetryController<T>::SymmetryController(
         BreakIDReader sym_reader;
         success = sym_reader.load(sym_filename, _num_vars, &_group);
         // _group.debugPrint();
+    } else {
+        success = false;
+        assert(false);
     }
-    if (!success)
+    if (!success) {
         LOG(ERROR) << "Saucy file " << sym_filename << " is not well formed.";
+    }
 }
 
 template<class T>

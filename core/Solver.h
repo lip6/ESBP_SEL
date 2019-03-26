@@ -459,7 +459,7 @@ public:
 
     int nGenerators(){return generators.size();}
 
-    void printClause(vec<Lit>& cl){
+    void printClause(const vec<Lit>& cl){
         for(int64_t i=0; i<cl.size(); ++i){
             char val = 'a';
             if(value(cl[i])==l_Undef){

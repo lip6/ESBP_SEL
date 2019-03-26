@@ -54,6 +54,9 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 #include "core/Solver.h"
 #include "core/Constants.h"
 
+
+#define PL(l) (sign(l)?"-":"") << var(l)+1
+
 using namespace Glucose;
 
 //=================================================================================================
@@ -1145,11 +1148,14 @@ NextClause:
             // unit or conflicting clause
             assert(value(selClauses[watch])==l_False);
 
+            assert(!ca[reason(selProp[currentclause])].symmetry());
+
             // create new learned clause
             selGen[currentclause]->getSymmetricalClause(ca[reason(selProp[currentclause])],symmetrical);
             minimizeClause(symmetrical);
             if(symmetrical.size()<2){
-
+                // DEBUG Ignore level zero
+                continue;
                 assert(symmetrical.size()==1);
                 cancelUntil(0);
                 if(value(symmetrical[0])==l_Undef){ // unit clause
@@ -1187,6 +1193,8 @@ NextClause:
         int watchEnd = genWatchIndices[var(currentGenLit)+1];
 
         if(level(var(currentGenLit))==0){ // NOTE: special purpose level 0 method needed as not all level 0 propagations have a reason clause attached to it
+            // DEBUG Ignore level zero
+            continue;
             assert(decisionLevel()==0);
             for(int i=watchStart; i<watchEnd; ++i){
                 Lit symlit=genWatches[i]->getImage(currentGenLit);
@@ -1207,14 +1215,25 @@ NextClause:
             continue; // choice literal
         }
 
+        // DEBUG
+        // if (ca[reason_cgl].learnt())
+        //     continue;
+
+        if (ca[reason_cgl].symmetry())
+            continue;  // Clause generated or deduced by ESBP
+
         for(; watchidx<watchEnd-watchStart; ++watchidx){
             SymGenerator* g = genWatches[watchStart+watchidx];
             assert(g->permutes(currentGenLit));
             int result = addSelClause(g, currentGenLit);
-            if(result<2){ // either conflict or unit clause
+            if(result < 2){ // either conflict or unit clause
+                assert(!ca[reason_cgl].symmetry());
+
                 g->getSymmetricalClause(ca[reason_cgl],symmetrical);
                 minimizeClause(symmetrical);
                 if(symmetrical.size()<2){
+                    // DEBUG Ignore level 0
+                    continue;
                     assert(symmetrical.size()==1);
                     cancelUntil(0);
                     if(value(symmetrical[0])==l_Undef){ // unit clause
@@ -1536,6 +1555,9 @@ lbool Solver::search(int nof_conflicts) {
 
             if (learnt_clause.size() == 1) {
                 uncheckedEnqueue(learnt_clause[0]);
+                if (isSymmetry)
+                    std::cout << "ESBP units " << PL(learnt_clause[0]) << std::endl;
+
                 nbUn++;
                 parallelExportUnaryClause(learnt_clause[0]);
             } else {
@@ -2026,15 +2048,15 @@ void Solver::minimizeClause(vec<Lit>& cl){
 CRef Solver::addClauseFromSymmetry(vec<Lit>& symmetrical){
     assert(symmetrical.size()>0);
 
-    CRef cr = ca.alloc(symmetrical, true, false, false);
+    CRef cr = ca.alloc(symmetrical, true, false, true); // FIXME last true will be false
     ca[cr].setOneWatched(false);
 	  //ca[cr].setSizeWithoutSelectors(szWithoutSelectors); // TODO: Is this code needed? What does it do?
     learnts.push(cr);
     attachClause(cr);
     claBumpActivity(ca[cr]);
-    if(symmetrical.size()<=1){
+    if(symmetrical.size() <= 1){
         cancelUntil(0);
-    }else{
+    } else {
         cancelUntil(level(var(symmetrical[1])));
         assert(value(symmetrical[1])==l_False);
     }
@@ -2054,7 +2076,7 @@ int Solver::addSelClause(SymGenerator* g, Lit l){
 
     const Clause& c_l = ca[reason_l];
     for(int i=0; i<c_l.size(); ++i){
-        if(value(g->getImage(c_l[i]))==l_True){ // unknown lits, keep in clause
+        if(value(g->getImage(c_l[i])) == l_True) { // unknown lits, keep in clause
             return 2;
         }
     }
@@ -2118,7 +2140,7 @@ bool Solver::testSelClauses(){
                 for(int j=selIdx[cl]; j<selIdx[cl+1]; ++j){
                     printf("%d ",toInt(selClauses[j]));
                 }
-                printf("-> missing selClauseLiteral %d\n",toInt(symlit));
+                printf("-> missing selClauseLiteral %d\n", toInt(symlit));
                 return false;
             }
         }
@@ -2177,6 +2199,9 @@ CRef Solver::learntSymmetryClause(cosy::ClauseInjector::Type type, Lit p) {
 
             CRef cr = ca.alloc(sbp, true, false, true);
             assert(ca[cr].symmetry());
+            ca[cr].setLBD(computeLBD(ca[cr]));
+            ca[cr].setOneWatched(false);
+            ca[cr].setSizeWithoutSelectors(0);  // I don't know how to put here !!!
             learnts.push(cr);
             attachClause(cr);
 

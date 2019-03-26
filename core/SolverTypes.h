@@ -324,8 +324,10 @@ class ClauseAllocator : public RegionAllocator<uint32_t>
         cr = to.alloc(c, c.learnt(), c.wasImported(), c.symmetry());
         c.relocate(cr);
 
+        // DEBUG
         if (c.symmetry())
             assert(to[cr].symmetry());
+
         // Copy extra data-fields:
         // (This could be cleaned-up. Generalize Clause-constructor to be applicable here instead?)
         to[cr].mark(c.mark());
