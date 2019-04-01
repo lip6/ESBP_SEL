@@ -139,7 +139,6 @@ verbosity(0)
 , nbstopsrestarts(0), nbstopsrestartssame(0), lastblockatrestart(0)
 , dec_vars(0), clauses_literals(0), learnts_literals(0), max_literals(0), tot_literals(0)
 , curRestart(1)
-
 , ok(true)
 , cla_inc(1)
 , var_inc(1)
@@ -625,6 +624,7 @@ void Solver::cancelUntil(int lvl) {
             assigns [x] = l_Undef;
             if (symmetry != nullptr)
                 symmetry->updateCancel(trail[c]);
+            updateCancelSEL(trail[c]);
 
             if (phase_saving > 1 || ((phase_saving == 1) && c > trail_lim.last())) {
                 polarity[x] = sign(trail[c]);
@@ -991,6 +991,7 @@ StartPropagate:
 
         // ESBP
         if (symmetry != nullptr) {
+            updateNotifySEL(p, level(var(p)));
             symmetry->updateNotify(p, decisionLevel(), reason(var(p)) == CRef_Undef);
             confl = learntSymmetryClause(cosy::ClauseInjector::ESBP, p);
             if (confl != CRef_Undef)
@@ -1098,6 +1099,7 @@ NextClause:
     }
 
     vec<Lit> symmetrical;
+
 /*** first check existing symmetrical clauses ***/
     for(; confl == CRef_Undef && qhead_sel<trail.size(); ++qhead_sel){
         Lit prop = trail[qhead_sel];
@@ -1151,9 +1153,12 @@ NextClause:
             assert(!ca[reason(selProp[currentclause])].symmetry());
 
             // create new learned clause
-            selGen[currentclause]->getSymmetricalClause(ca[reason(selProp[currentclause])],symmetrical);
+            selGen[currentclause]->getSymmetricalClause(ca[reason(selProp[currentclause])], symmetrical);
+
+
             minimizeClause(symmetrical);
-            if(symmetrical.size()<2){
+            if(symmetrical.size() < 2){
+                assert(false);
                 // DEBUG Ignore level zero
                 continue;
                 assert(symmetrical.size()==1);
@@ -1183,7 +1188,6 @@ NextClause:
         }
     }
 
-
 /*** check for new symmetrical clauses ***/
     for(; confl == CRef_Undef && qhead_gen<trail.size(); ++qhead_gen, watchidx=0){ // do generator symmetry propagation
         Lit currentGenLit = trail[qhead_gen];
@@ -1202,7 +1206,7 @@ NextClause:
                     ++symgenprops;
                     uncheckedEnqueue(symlit);
                     goto StartPropagate;
-                } else if (value(symlit)==l_False){ // conflict clause
+                } else if (value(symlit) == l_False){ // conflict clause
                     ++symgenconfls;
                     confl = CRef_Unsat;
                     goto ConflDetected;
@@ -1215,9 +1219,6 @@ NextClause:
             continue; // choice literal
         }
 
-        // DEBUG
-        // if (ca[reason_cgl].learnt())
-        //     continue;
 
         if (ca[reason_cgl].symmetry())
             continue;  // Clause generated or deduced by ESBP
@@ -2046,9 +2047,9 @@ void Solver::minimizeClause(vec<Lit>& cl){
 
 // NOTE: sometimes backtracks to add unit clause instead of conflict clause
 CRef Solver::addClauseFromSymmetry(vec<Lit>& symmetrical){
-    assert(symmetrical.size()>0);
+    assert(symmetrical.size() > 0);
 
-    CRef cr = ca.alloc(symmetrical, true, false, true); // FIXME last true will be false
+    CRef cr = ca.alloc(symmetrical, true, false, false);
     ca[cr].setOneWatched(false);
 	  //ca[cr].setSizeWithoutSelectors(szWithoutSelectors); // TODO: Is this code needed? What does it do?
     learnts.push(cr);
@@ -2162,6 +2163,20 @@ void Solver::initiateGenWatches(){
             }
         }
         genWatchIndices.push(genWatches.size());
+    }
+}
+
+void Solver::updateNotifySEL(Lit p, int level) {
+    for (int i=0; i<generators.size(); i++) {
+        SymGenerator *g = generators[i];
+        g->updateNotify(p, level, assigns);
+    }
+}
+
+void Solver::updateCancelSEL(Lit p) {
+    for (int i=0; i<generators.size(); i++) {
+        SymGenerator *g = generators[i];
+        g->updateCancel(p);
     }
 }
 
