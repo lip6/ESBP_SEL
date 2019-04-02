@@ -884,7 +884,6 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt,vec<Lit>&selectors, int& o
     if (!isSymmetry)
         return;
 
-
     comp->clear();
     if (isSymmetry && !fsym) {
         for (CRef cr : conf_clauses) {
@@ -1218,12 +1217,12 @@ NextClause:
             // create new learned clause
             selGen[currentclause]->getSymmetricalClause(ca[reason(selProp[currentclause])], symmetrical);
 
+            // if (!selGen[currentclause]->isActive())
+            //     continue;
 
             minimizeClause(symmetrical);
             if(symmetrical.size() < 2){
                 assert(false);
-                // DEBUG Ignore level zero
-                continue;
                 assert(symmetrical.size()==1);
                 cancelUntil(0);
                 if(value(symmetrical[0])==l_Undef){ // unit clause
@@ -1260,9 +1259,9 @@ NextClause:
         int watchEnd = genWatchIndices[var(currentGenLit)+1];
 
         if(level(var(currentGenLit))==0){ // NOTE: special purpose level 0 method needed as not all level 0 propagations have a reason clause attached to it
-            // DEBUG Ignore level zero
-            continue;
             assert(decisionLevel()==0);
+            if (forbid_units.find(var(currentGenLit)) != forbid_units.end())
+                continue;
             for(int i=watchStart; i<watchEnd; ++i){
                 Lit symlit=genWatches[i]->getImage(currentGenLit);
                 if(value(symlit)==l_Undef){ // unit clause
@@ -1282,10 +1281,6 @@ NextClause:
             continue; // choice literal
         }
 
-
-        if (ca[reason_cgl].symmetry())
-            continue;  // Clause generated or deduced by ESBP
-
         for(; watchidx<watchEnd-watchStart; ++watchidx){
             SymGenerator* g = genWatches[watchStart+watchidx];
             assert(g->permutes(currentGenLit));
@@ -1293,7 +1288,7 @@ NextClause:
                 continue;
             int result = addSelClause(g, currentGenLit);
             if(result < 2){ // either conflict or unit clause
-                assert(!ca[reason_cgl].symmetry());
+                // assert(!ca[reason_cgl].symmetry());
 
                 g->getSymmetricalClause(ca[reason_cgl],symmetrical);
                 minimizeClause(symmetrical);
@@ -2139,7 +2134,6 @@ CRef Solver::addClauseFromSymmetry(vec<Lit>& symmetrical){
 int Solver::addSelClause(SymGenerator* g, Lit l){
     CRef reason_l = reason(var(l));
     assert(reason_l != CRef_Undef);
-    assert(!ca[reason_l].symmetry());
 
     const Clause& c_l = ca[reason_l];
     for(int i=0; i<c_l.size(); ++i){
@@ -2252,7 +2246,6 @@ void Solver::updateNotifySEL(Lit p) {
     }
 
     bool isESBPUnit = forbid_units.find(var(p)) != forbid_units.end();
-
     for (int i=0; i<generators.size(); i++) {
         SymGenerator *g = generators[i];
         g->updateNotify(p, level(var(p)), isESBPUnit, assigns);
