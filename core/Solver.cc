@@ -1615,9 +1615,9 @@ lbool Solver::search(int nof_conflicts) {
             }
 
             if (learnt_clause.size() == 1) {
-                uncheckedEnqueue(learnt_clause[0]);
                 if (isSymmetry)
                     forbid_units.insert(var(learnt_clause[0]));
+                uncheckedEnqueue(learnt_clause[0]);
 
                 nbUn++;
                 parallelExportUnaryClause(learnt_clause[0]);
@@ -2248,7 +2248,8 @@ void Solver::updateNotifySEL(Lit p) {
     bool isESBPUnit = forbid_units.find(var(p)) != forbid_units.end();
     for (int i=0; i<generators.size(); i++) {
         SymGenerator *g = generators[i];
-        g->updateNotify(p, level(var(p)), isESBPUnit, assigns);
+        if (g->permutes(p))
+            g->updateNotify(p, level(var(p)), isESBPUnit, assigns);
     }
 
 }
@@ -2256,7 +2257,8 @@ void Solver::updateNotifySEL(Lit p) {
 void Solver::updateCancelSEL(Lit p) {
     for (int i=0; i<generators.size(); i++) {
         SymGenerator *g = generators[i];
-        g->updateCancel(p);
+        if (g->permutes(p))
+            g->updateCancel(p);
     }
 }
 
