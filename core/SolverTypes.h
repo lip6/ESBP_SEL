@@ -560,19 +560,19 @@ public:
     void updateNotify(Lit l, int level, bool isESBPUnit, const vec<lbool>& assigns) {
         if (level == 0 && isESBPUnit) {
             breakUnits.push(l);
-        }
-        for (; breakUnitsIndex < breakUnits.size(); breakUnitsIndex++) {
-            Var p = var(breakUnits[breakUnitsIndex]);
-            Var sym = var(getImage(breakUnits[breakUnitsIndex]));
 
-            if (assigns[p] != assigns[sym])
-                break;
+            for (; breakUnitsIndex < breakUnits.size(); breakUnitsIndex++) {
+                Var p = var(breakUnits[breakUnitsIndex]);
+                Var sym = var(getImage(breakUnits[breakUnitsIndex]));
+
+                if (assigns[p] != assigns[sym])
+                    break;
+            }
         }
     }
 
 
     void updateCancel(Lit l) {
-        breakUnitsIndex = 0;
     }
 
     void notifyReasonOfBreaked(Lit l) {

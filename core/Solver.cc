@@ -2189,7 +2189,7 @@ void Solver::updateNotifySEL(Lit p) {
     for (int i=0; i<generators.size(); i++) {
         SymGenerator *g = generators[i];
         if (g->permutes(p))
-            g->updateNotify(p, 0, isESBPUnit, assigns);
+            g->updateNotify(p, decisionLevel(), isESBPUnit, assigns);
     }
 }
 
