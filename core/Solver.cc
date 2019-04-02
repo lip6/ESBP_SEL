@@ -968,7 +968,7 @@ void Solver::uncheckedEnqueue(Lit p, CRef from) {
         const Clause& c = ca[from];
         for (int i=0; i<c.size(); i++) {
             if (forbid_units.find(var(c[i])) != forbid_units.end()) {
-                forbid_units.insert(var(c[i]));
+                forbid_units.insert(var(p));
                 break;
             }
         }
@@ -1570,11 +1570,11 @@ lbool Solver::search(int nof_conflicts) {
             }
 
             if (learnt_clause.size() == 1) {
-                uncheckedEnqueue(learnt_clause[0]);
                 if (isSymmetry) {
                     forbid_units.insert(var(learnt_clause[0]));
                     std::cout << "ESBP units " << PL(learnt_clause[0]) << std::endl;
                 }
+                uncheckedEnqueue(learnt_clause[0]);
                 nbUn++;
                 parallelExportUnaryClause(learnt_clause[0]);
             } else {
