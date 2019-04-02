@@ -557,16 +557,16 @@ public:
 
 
     /* ESBP Compatibility */
-    void updateNotify(Lit l, int level, const vec<lbool>& assigns) {
-        if (level == 0) {
+    void updateNotify(Lit l, int level, bool isESBPUnit, const vec<lbool>& assigns) {
+        if (level == 0 && isESBPUnit) {
             breakUnits.push(l);
-            for (; breakUnitsIndex < breakUnits.size(); breakUnitsIndex++) {
-                Var p = var(breakUnits[breakUnitsIndex]);
-                Var sym = var(getImage(breakUnits[breakUnitsIndex]));
+        }
+        for (; breakUnitsIndex < breakUnits.size(); breakUnitsIndex++) {
+            Var p = var(breakUnits[breakUnitsIndex]);
+            Var sym = var(getImage(breakUnits[breakUnitsIndex]));
 
-                if (assigns[p] != assigns[sym])
-                    break;
-            }
+            if (assigns[p] != assigns[sym])
+                break;
         }
     }
 

@@ -2185,16 +2185,19 @@ void Solver::initiateGenWatches(){
 void Solver::updateNotifySEL(Lit p) {
     if (level(var(p)) != 0)
         return;
+    bool isESBPUnit = forbid_units.find(var(p)) != forbid_units.end();
     for (int i=0; i<generators.size(); i++) {
         SymGenerator *g = generators[i];
-        g->updateNotify(p, 0, assigns);
+        if (g->permutes(p))
+            g->updateNotify(p, 0, isESBPUnit, assigns);
     }
 }
 
 void Solver::updateCancelSEL(Lit p) {
     for (int i=0; i<generators.size(); i++) {
         SymGenerator *g = generators[i];
-        g->updateCancel(p);
+        if (g->permutes(p))
+            g->updateCancel(p);
     }
 }
 
