@@ -1762,8 +1762,10 @@ lbool Solver::solve_(bool do_simp, bool turn_off_simp) // Parameters are useless
             std::vector<Lit> literals = symmetry->clauseToInject(type);
             assert(literals.size() == 1);
             Lit l = literals[0];
-            if (value(l) == l_Undef)
+            if (value(l) == l_Undef) {
+                forbid_units.insert(var(l));
                 uncheckedEnqueue(l);
+            }
 	}
     }
 
