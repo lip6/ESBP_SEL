@@ -584,6 +584,7 @@ public:
             reasonOfBreaked = lit_Undef;
     }
 
+    bool isActive() const { return isStableLevelZero(); }
     bool isStab() const { return reasonOfBreaked == lit_Undef; }
 
     bool isStableLevelZero() const {

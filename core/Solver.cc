@@ -963,6 +963,19 @@ void Solver::uncheckedEnqueue(Lit p, CRef from) {
     assigns[var(p)] = lbool(!sign(p));
     vardata[var(p)] = mkVarData(from, decisionLevel());
     trail.push_(p);
+
+    if (decisionLevel() == 0 && from != CRef_Undef) {
+        const Clause& c = ca[from];
+        for (int i=0; i<c.size(); i++) {
+            if (forbid_units.find(var(c[i])) != forbid_units.end()) {
+                forbid_units.insert(var(c[i]));
+                break;
+            }
+        }
+    }
+
+    updateNotifySEL(p, level(var(p)));
+
 }
 
 /*_________________________________________________________________________________________________
@@ -991,12 +1004,12 @@ StartPropagate:
 
         // ESBP
         if (symmetry != nullptr) {
-            updateNotifySEL(p, level(var(p)));
             symmetry->updateNotify(p, decisionLevel(), reason(var(p)) == CRef_Undef);
             confl = learntSymmetryClause(cosy::ClauseInjector::ESBP, p);
             if (confl != CRef_Undef)
                 return confl;
         }
+
         // First, Propagate binary clauses
         vec<Watcher>& wbin = watchesBin[p];
 
@@ -1151,6 +1164,7 @@ NextClause:
             assert(value(selClauses[watch])==l_False);
 
             assert(!ca[reason(selProp[currentclause])].symmetry());
+            assert(selGen[currentclause]->isActive());
 
             // create new learned clause
             selGen[currentclause]->getSymmetricalClause(ca[reason(selProp[currentclause])], symmetrical);
@@ -1225,6 +1239,8 @@ NextClause:
 
         for(; watchidx<watchEnd-watchStart; ++watchidx){
             SymGenerator* g = genWatches[watchStart+watchidx];
+            if (!g->isActive())
+                continue;
             assert(g->permutes(currentGenLit));
             int result = addSelClause(g, currentGenLit);
             if(result < 2){ // either conflict or unit clause
@@ -1556,9 +1572,10 @@ lbool Solver::search(int nof_conflicts) {
 
             if (learnt_clause.size() == 1) {
                 uncheckedEnqueue(learnt_clause[0]);
-                if (isSymmetry)
+                if (isSymmetry) {
+                    forbid_units.insert(var(learnt_clause[0]));
                     std::cout << "ESBP units " << PL(learnt_clause[0]) << std::endl;
-
+                }
                 nbUn++;
                 parallelExportUnaryClause(learnt_clause[0]);
             } else {
