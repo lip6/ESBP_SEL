@@ -572,6 +572,7 @@ public:
 
 
     void updateCancel(Lit l) {
+        breakUnitsIndex = 0;
     }
 
     void notifyReasonOfBreaked(Lit l) {
