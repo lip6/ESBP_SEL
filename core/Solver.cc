@@ -974,8 +974,7 @@ void Solver::uncheckedEnqueue(Lit p, CRef from) {
         }
     }
 
-    updateNotifySEL(p, level(var(p)));
-
+    updateNotifySEL(p);
 }
 
 /*_________________________________________________________________________________________________
@@ -2183,10 +2182,12 @@ void Solver::initiateGenWatches(){
     }
 }
 
-void Solver::updateNotifySEL(Lit p, int level) {
+void Solver::updateNotifySEL(Lit p) {
+    if (level(var(p)) != 0)
+        return;
     for (int i=0; i<generators.size(); i++) {
         SymGenerator *g = generators[i];
-        g->updateNotify(p, level, assigns);
+        g->updateNotify(p, 0, assigns);
     }
 }
 

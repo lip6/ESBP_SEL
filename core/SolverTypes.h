@@ -570,8 +570,8 @@ public:
         }
     }
 
+
     void updateCancel(Lit l) {
-        cancelReasonOfBreaked(l);
     }
 
     void notifyReasonOfBreaked(Lit l) {

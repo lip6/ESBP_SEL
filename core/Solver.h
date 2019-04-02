@@ -106,7 +106,7 @@ public:
     void notifyCNFUnits();
     std::unordered_set<Var> forbid_units;
 
-    void updateNotifySEL(Lit p, int level);
+    void updateNotifySEL(Lit p);
     void updateCancelSEL(Lit p);
 
     // Solving:
