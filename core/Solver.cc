@@ -397,7 +397,7 @@ bool Solver::addClause_(vec<Lit>& ps) {
         uncheckedEnqueue(ps[0]);
         return ok = (propagate() == CRef_Undef);
     } else {
-        CRef cr = ca.alloc(ps, false, false, false);
+      CRef cr = ca.alloc(ps, false, false, false, false);
         clauses.push(cr);
         attachClause(cr);
     }
@@ -700,11 +700,15 @@ Lit Solver::pickBranchLit() {
 |        rest of literals. There may be others from the same level though.
 |
 |________________________________________________________________________________________________@*/
-void Solver::analyze(CRef confl, vec<Lit>& out_learnt,vec<Lit>&selectors, int& out_btlevel,unsigned int &lbd,unsigned int &szWithoutSelectors, bool &isSymmetry) {
+void Solver::analyze(CRef confl, vec<Lit>& out_learnt,vec<Lit>&selectors, int& out_btlevel,unsigned int &lbd,unsigned int &szWithoutSelectors, bool &isSymmetry, std::set<SymGenerator*>* comp) {
     int pathC = 0;
     Lit p = lit_Undef;
 
     isSymmetry = false;
+
+    bool fsym = ca[confl].fsymmetry();
+    std::vector<CRef> conf_clauses;
+
 
     // Generate conflict clause:
     //
@@ -722,8 +726,10 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt,vec<Lit>&selectors, int& o
             c[0] = c[1], c[1] = tmp;
         }
 
-        if (c.symmetry())
+        if (c.symmetry()) {
             isSymmetry = true;
+            conf_clauses.push_back(confl);
+        }
 
         if (c.learnt()) {
             parallelImportClauseDuringConflictAnalysis(c,confl);
@@ -874,6 +880,51 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt,vec<Lit>&selectors, int& o
 
     for (int j = 0; j < analyze_toclear.size(); j++) seen[var(analyze_toclear[j])] = 0; // ('seen[]' is now cleared)
     for (int j = 0; j < selectors.size(); j++) seen[var(selectors[j])] = 0;
+
+    if (!isSymmetry)
+        return;
+
+
+    comp->clear();
+    if (isSymmetry && !fsym) {
+        for (CRef cr : conf_clauses) {
+            std::set<SymGenerator*>* check = ca[cr].scompat();
+            if (check->empty()) {
+                comp->clear();
+                break;
+            }
+
+            if (comp->empty()) {
+                comp->insert(check->begin(), check->end());
+                continue;
+            }
+
+            // make intersection with c in place on comp
+            std::set<SymGenerator*>::iterator it1 = comp->begin();
+            std::set<SymGenerator*>::iterator it2 = check->begin();
+            while ( (it1 != comp->end()) && (it2 != check->end()) ) {
+                if (*it1 < *it2) {
+                    comp->erase(it1++);
+                } else if (*it2 < *it1) {
+                    ++it2;
+                } else { // *it1 == *it2
+                    ++it1;
+                    ++it2;
+                }
+            }
+            comp->erase(it1, comp->end());
+            if (comp->empty())
+                break;
+        }
+    }
+    for (int i=0; i<generators.size(); i++) {
+        SymGenerator *g = generators[i];
+        if(comp->find(g) != comp->end())
+            continue;
+
+        if (g->stabilize(out_learnt))
+            comp->insert(g);
+    }
 }
 
 
@@ -963,6 +1014,18 @@ void Solver::uncheckedEnqueue(Lit p, CRef from) {
     assigns[var(p)] = lbool(!sign(p));
     vardata[var(p)] = mkVarData(from, decisionLevel());
     trail.push_(p);
+
+    if (decisionLevel() == 0 && from != CRef_Undef) {
+        const Clause& clause = ca[from];
+        for (int i=0; i<clause.size(); i++) {
+            if (forbid_units.find(var(clause[i])) != forbid_units.end()) {
+                forbid_units.insert(var(p));
+                break;
+            }
+        }
+    }
+
+    updateNotifySEL(p);
 }
 
 /*_________________________________________________________________________________________________
@@ -991,12 +1054,12 @@ StartPropagate:
 
         // ESBP
         if (symmetry != nullptr) {
-            updateNotifySEL(p, level(var(p)));
             symmetry->updateNotify(p, decisionLevel(), reason(var(p)) == CRef_Undef);
             confl = learntSymmetryClause(cosy::ClauseInjector::ESBP, p);
             if (confl != CRef_Undef)
                 return confl;
         }
+
         // First, Propagate binary clauses
         vec<Watcher>& wbin = watchesBin[p];
 
@@ -1226,6 +1289,8 @@ NextClause:
         for(; watchidx<watchEnd-watchStart; ++watchidx){
             SymGenerator* g = genWatches[watchStart+watchidx];
             assert(g->permutes(currentGenLit));
+            if (!g->isActive())
+                continue;
             int result = addSelClause(g, currentGenLit);
             if(result < 2){ // either conflict or unit clause
                 assert(!ca[reason_cgl].symmetry());
@@ -1539,8 +1604,8 @@ lbool Solver::search(int nof_conflicts) {
 
             learnt_clause.clear();
             selectors.clear();
-
-            analyze(confl, learnt_clause, selectors, backtrack_level, nblevels,szWithoutSelectors, isSymmetry);
+            std::set<SymGenerator*> comp;
+            analyze(confl, learnt_clause, selectors, backtrack_level, nblevels,szWithoutSelectors, isSymmetry, &comp);
 
             lbdQueue.push(nblevels);
             sumLBD += nblevels;
@@ -1557,12 +1622,13 @@ lbool Solver::search(int nof_conflicts) {
             if (learnt_clause.size() == 1) {
                 uncheckedEnqueue(learnt_clause[0]);
                 if (isSymmetry)
-                    std::cout << "ESBP units " << PL(learnt_clause[0]) << std::endl;
+                    forbid_units.insert(var(learnt_clause[0]));
 
                 nbUn++;
                 parallelExportUnaryClause(learnt_clause[0]);
             } else {
-                CRef cr = ca.alloc(learnt_clause, true, false, isSymmetry);
+                std::unique_ptr<std::set<SymGenerator*>> compatibility = isSymmetry ? std::unique_ptr<std::set<SymGenerator*>>(new std::set<SymGenerator*>(comp.begin(), comp.end())) : nullptr;
+                CRef cr = ca.alloc(learnt_clause, true, false, false, isSymmetry, std::move(compatibility));
                 assert(ca[cr].symmetry() == isSymmetry);
                 ca[cr].setLBD(nblevels);
                 ca[cr].setOneWatched(false);
@@ -2049,7 +2115,7 @@ void Solver::minimizeClause(vec<Lit>& cl){
 CRef Solver::addClauseFromSymmetry(vec<Lit>& symmetrical){
     assert(symmetrical.size() > 0);
 
-    CRef cr = ca.alloc(symmetrical, true, false, false);
+    CRef cr = ca.alloc(symmetrical, true, false, false, false);
     ca[cr].setOneWatched(false);
 	  //ca[cr].setSizeWithoutSelectors(szWithoutSelectors); // TODO: Is this code needed? What does it do?
     learnts.push(cr);
@@ -2166,11 +2232,32 @@ void Solver::initiateGenWatches(){
     }
 }
 
-void Solver::updateNotifySEL(Lit p, int level) {
+void Solver::updateNotifySEL(Lit p) {
+    CRef cr = reason(var(p));
+    Lit l;
+    bool isBreakClause = cr != CRef_Undef && ca[cr].symmetry();
+    if (isBreakClause) {
+        const Clause& clause = ca[cr];
+        for (int j=0; j<clause.size(); j++) {
+            l = clause[j];
+            for (int i=0; i<generators.size(); i++) {
+                SymGenerator *g = generators[i];
+                assert(ca[cr].scompat() != nullptr);
+                bool isNotCompatible = ca[cr].scompat()->find(g) == ca[cr].scompat()->end();
+                if (g->isStab() && isNotCompatible) {
+                    g->notifyReasonOfBreaked(p);
+                }
+            }
+        }
+    }
+
+    bool isESBPUnit = forbid_units.find(var(p)) != forbid_units.end();
+
     for (int i=0; i<generators.size(); i++) {
         SymGenerator *g = generators[i];
-        g->updateNotify(p, level, assigns);
+        g->updateNotify(p, level(var(p)), isESBPUnit, assigns);
     }
+
 }
 
 void Solver::updateCancelSEL(Lit p) {
@@ -2212,7 +2299,15 @@ CRef Solver::learntSymmetryClause(cosy::ClauseInjector::Type type, Lit p) {
             if (max_i != 0)
                 std::swap(sbp[0], sbp[max_i]);
 
-            CRef cr = ca.alloc(sbp, true, false, true);
+            std::set<SymGenerator*>comp;
+            for (int i=0; i<generators.size(); i++) {
+                SymGenerator *g = generators[i];
+
+                if (g->stabilize(sbp))
+                    comp.insert(g);
+            }
+            std::unique_ptr<std::set<SymGenerator*>> compatibility(new std::set<SymGenerator*>(comp.begin(), comp.end()));
+            CRef cr = ca.alloc(sbp, true, false, true, true, std::move(compatibility));
             assert(ca[cr].symmetry());
             ca[cr].setLBD(computeLBD(ca[cr]));
             ca[cr].setOneWatched(false);
