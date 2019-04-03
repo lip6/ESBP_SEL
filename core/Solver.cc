@@ -1755,8 +1755,6 @@ lbool Solver::solve_(bool do_simp, bool turn_off_simp) // Parameters are useless
                              cosy::ValueMode::TRUE_LESS_FALSE);
         symmetry->printInfo();
 
-        notifyCNFUnits();
-
         cosy::ClauseInjector::Type type = cosy::ClauseInjector::UNITS;
 	while (symmetry->hasClauseToInject(type)) {
 

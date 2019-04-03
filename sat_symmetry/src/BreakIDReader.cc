@@ -87,7 +87,6 @@ bool BreakIDReader::load(const std::string& symmetry_filename,
             }
         }
     }
-    group->debugPrint();
 
     return true;
 }
