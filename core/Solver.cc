@@ -751,6 +751,9 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt,vec<Lit>&selectors, int& o
         for (int j = (p == lit_Undef) ? 0 : 1; j < c.size(); j++) {
             Lit q = c[j];
 
+            // if (level(var(q)) == 0 && forbid_units.find(var(q)) != forbid_units.end())
+            //     isSymmetry = true;
+
             if (!seen[var(q)]) {
                 if (level(var(q)) == 0) {
                 } else { // Here, the old case
@@ -1111,7 +1114,6 @@ NextClause:
     }
 
     vec<Lit> symmetrical;
-
 /*** first check existing symmetrical clauses ***/
     for(; confl == CRef_Undef && qhead_sel<trail.size(); ++qhead_sel){
         Lit prop = trail[qhead_sel];
@@ -1171,9 +1173,6 @@ NextClause:
 
             minimizeClause(symmetrical);
             if(symmetrical.size() < 2){
-                assert(false);
-                // DEBUG Ignore level zero
-                continue;
                 assert(symmetrical.size()==1);
                 cancelUntil(0);
                 if(value(symmetrical[0])==l_Undef){ // unit clause
@@ -1210,8 +1209,8 @@ NextClause:
         int watchEnd = genWatchIndices[var(currentGenLit)+1];
 
         if(level(var(currentGenLit))==0){ // NOTE: special purpose level 0 method needed as not all level 0 propagations have a reason clause attached to it
-            // DEBUG Ignore level zero
-            continue;
+            if (forbid_units.find(var(currentGenLit)) != forbid_units.end())
+                continue;
             assert(decisionLevel()==0);
             for(int i=watchStart; i<watchEnd; ++i){
                 Lit symlit=genWatches[i]->getImage(currentGenLit);
@@ -1232,7 +1231,6 @@ NextClause:
             continue; // choice literal
         }
 
-
         if (ca[reason_cgl].symmetry())
             continue;  // Clause generated or deduced by ESBP
 
@@ -1245,8 +1243,9 @@ NextClause:
             if(result < 2){ // either conflict or unit clause
                 assert(!ca[reason_cgl].symmetry());
 
-                g->getSymmetricalClause(ca[reason_cgl],symmetrical);
+                g->getSymmetricalClause(ca[reason_cgl], symmetrical);
                 minimizeClause(symmetrical);
+
                 if(symmetrical.size()<2){
                     // DEBUG Ignore level 0
                     continue;
@@ -1709,16 +1708,16 @@ lbool Solver::solve_(bool do_simp, bool turn_off_simp) // Parameters are useless
                              cosy::ValueMode::TRUE_LESS_FALSE);
         symmetry->printInfo();
 
-        notifyCNFUnits();
-
         cosy::ClauseInjector::Type type = cosy::ClauseInjector::UNITS;
 	while (symmetry->hasClauseToInject(type)) {
 
             std::vector<Lit> literals = symmetry->clauseToInject(type);
             assert(literals.size() == 1);
             Lit l = literals[0];
-            if (value(l) == l_Undef)
+            if (value(l) == l_Undef) {
                 uncheckedEnqueue(l);
+                forbid_units.insert(var(l));
+            }
 	}
     }
 
@@ -2183,8 +2182,6 @@ void Solver::initiateGenWatches(){
 }
 
 void Solver::updateNotifySEL(Lit p) {
-    if (level(var(p)) != 0)
-        return;
     bool isESBPUnit = forbid_units.find(var(p)) != forbid_units.end();
     for (int i=0; i<generators.size(); i++) {
         SymGenerator *g = generators[i];

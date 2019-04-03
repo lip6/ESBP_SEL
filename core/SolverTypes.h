@@ -225,7 +225,6 @@ public:
     void         pop         ()              { shrink(1); }
     bool         learnt      ()      const   { return header.learnt; }
     bool         symmetry    ()      const   { return header.symmetry; }
-
     bool         has_extra   ()      const   { return header.extra_size > 0; }
     uint32_t     mark        ()      const   { return header.mark; }
     void         mark        (uint32_t m)    { header.mark = m; }
@@ -571,22 +570,10 @@ public:
         }
     }
 
-
     void updateCancel(Lit l) {
     }
 
-    void notifyReasonOfBreaked(Lit l) {
-        if(!isStab()) return;
-        reasonOfBreaked = l;
-    }
-
-    void cancelReasonOfBreaked(Lit p) {
-        if (reasonOfBreaked != lit_Undef && reasonOfBreaked == p)
-            reasonOfBreaked = lit_Undef;
-    }
-
     bool isActive() const { return isStableLevelZero(); }
-    bool isStab() const { return reasonOfBreaked == lit_Undef; }
 
     bool isStableLevelZero() const {
         return breakUnits.size() == 0 ||  breakUnitsIndex == breakUnits.size();

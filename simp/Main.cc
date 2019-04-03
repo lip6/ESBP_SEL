@@ -229,6 +229,7 @@ int main(int argc, char** argv)
             (new cosy::SymmetryController<Glucose::Lit>
              (cnf_file, symloc, cosy::SymmetryReader::BREAKID_SYM,
               std::move(adapter)));
+        S.notifyCNFUnits();
 
         gzFile in_sym = (argc == 1) ? gzdopen(0, "rb") : gzopen(symloc.c_str(), "rb");
 
