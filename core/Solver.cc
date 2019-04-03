@@ -757,6 +757,9 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt,vec<Lit>&selectors, int& o
         for (int j = (p == lit_Undef) ? 0 : 1; j < c.size(); j++) {
             Lit q = c[j];
 
+            if (level(var(q)) == 0 && forbid_units.find(var(q)) != forbid_units.end())
+                isSymmetry = true;
+
             if (!seen[var(q)]) {
                 if (level(var(q)) == 0) {
                 } else { // Here, the old case
@@ -1161,7 +1164,6 @@ NextClause:
     }
 
     vec<Lit> symmetrical;
-
 /*** first check existing symmetrical clauses ***/
     for(; confl == CRef_Undef && qhead_sel<trail.size(); ++qhead_sel){
         Lit prop = trail[qhead_sel];
@@ -1212,13 +1214,12 @@ NextClause:
             // unit or conflicting clause
             assert(value(selClauses[watch])==l_False);
 
-            assert(!ca[reason(selProp[currentclause])].symmetry());
+            if (!selGen[currentclause]->isActive())
+                continue;
 
             // create new learned clause
             selGen[currentclause]->getSymmetricalClause(ca[reason(selProp[currentclause])], symmetrical);
 
-            // if (!selGen[currentclause]->isActive())
-            //     continue;
 
             minimizeClause(symmetrical);
             if(symmetrical.size() < 2){
