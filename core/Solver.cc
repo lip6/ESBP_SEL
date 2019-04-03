@@ -1715,8 +1715,8 @@ lbool Solver::solve_(bool do_simp, bool turn_off_simp) // Parameters are useless
             assert(literals.size() == 1);
             Lit l = literals[0];
             if (value(l) == l_Undef) {
-                uncheckedEnqueue(l);
                 forbid_units.insert(var(l));
+                uncheckedEnqueue(l);
             }
 	}
     }
