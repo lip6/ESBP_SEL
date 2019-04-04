@@ -514,10 +514,6 @@ private:
     int offset;
     vec<Lit> image; // image[v-offset] is the image of mkLit(v) under this generator
 
-    vec<Lit> breakUnits;
-    int breakUnitsIndex;
-    Lit reasonOfBreaked;
-
     void addImage(Lit from, Lit to){
         assert(var(from)-offset >= 0);
         assert(var(from)-offset < image.size());
@@ -525,7 +521,7 @@ private:
     }
 
 public:
-    SymGenerator(vec<Lit>& from, vec<Lit>& to) : breakUnitsIndex(0), reasonOfBreaked(lit_Undef) {
+    SymGenerator(vec<Lit>& from, vec<Lit>& to){
         assert(from.size()==to.size());
         offset = INT_MAX;
         int maxVar = INT_MIN;
@@ -553,32 +549,6 @@ public:
             addImage(from[i],to[i]);
         }
     }
-
-
-    /* ESBP Compatibility */
-    void updateNotify(Lit l, int level, bool isESBPUnit, const vec<lbool>& assigns) {
-        if (level == 0 && isESBPUnit) {
-            breakUnits.push(l);
-
-            for (; breakUnitsIndex < breakUnits.size(); breakUnitsIndex++) {
-                Var p = var(breakUnits[breakUnitsIndex]);
-                Var sym = var(getImage(breakUnits[breakUnitsIndex]));
-
-                if (assigns[p] != assigns[sym])
-                    break;
-            }
-        }
-    }
-
-    void updateCancel(Lit l) {
-    }
-
-    bool isActive() const { return isStableLevelZero(); }
-
-    bool isStableLevelZero() const {
-        return breakUnits.size() == 0 ||  breakUnitsIndex == breakUnits.size();
-    }
-    /* ESBP Compatibility end */
 
     void print(){
         for(int i=0; i<image.size(); ++i){

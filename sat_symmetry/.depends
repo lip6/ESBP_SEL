@@ -14,11 +14,10 @@ obj/src/BreakIDReader.o: src/BreakIDReader.cc \
  include/cosy/Permutation.h include/cosy/Literal.h include/cosy/Logging.h \
  include/cosy/IntegralTypes.h include/cosy/IntType.h \
  include/cosy/StreamBuffer.h
-obj/src/SaucyReader.o: src/SaucyReader.cc include/cosy/SaucyReader.h \
- include/cosy/Group.h include/cosy/Macros.h include/cosy/Permutation.h \
+obj/src/Clause.o: src/Clause.cc include/cosy/Clause.h \
  include/cosy/Literal.h include/cosy/Logging.h \
- include/cosy/IntegralTypes.h include/cosy/IntType.h \
- include/cosy/StreamBuffer.h
+ include/cosy/IntegralTypes.h include/cosy/Macros.h \
+ include/cosy/IntType.h
 obj/src/Permutation.o: src/Permutation.cc include/cosy/Permutation.h \
  include/cosy/Literal.h include/cosy/Logging.h \
  include/cosy/IntegralTypes.h include/cosy/Macros.h \
@@ -32,26 +31,28 @@ obj/src/SymmetryFinder.o: src/SymmetryFinder.cc \
  include/cosy/Timer.h include/cosy/AutomorphismBuilder.h \
  include/cosy/LiteralGraphNodeAdaptor.h include/cosy/AutomorphismFinder.h \
  include/cosy/ColoredGraph.h include/cosy/BlissAutomorphismFinder.h \
- /tmp/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/graph.hh \
- /tmp/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/kstack.hh \
- /tmp/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/defs.hh \
- /tmp/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/kqueue.hh \
- /tmp/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/heap.hh \
- /tmp/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/orbit.hh \
- /tmp/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/partition.hh \
- /tmp/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/graph.hh \
- /tmp/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/bignum.hh \
- /tmp/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/uintseqhash.hh \
+ /home/hmetin/these/solvers/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/graph.hh \
+ /home/hmetin/these/solvers/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/kstack.hh \
+ /home/hmetin/these/solvers/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/defs.hh \
+ /home/hmetin/these/solvers/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/kqueue.hh \
+ /home/hmetin/these/solvers/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/heap.hh \
+ /home/hmetin/these/solvers/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/orbit.hh \
+ /home/hmetin/these/solvers/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/partition.hh \
+ /home/hmetin/these/solvers/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/graph.hh \
+ /home/hmetin/these/solvers/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/bignum.hh \
+ /home/hmetin/these/solvers/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/uintseqhash.hh \
  include/cosy/SaucyAutomorphismFinder.h \
- /tmp/ESBP_SEL/sat_symmetry/third_party/automorphism/saucy/saucy.h
+ /home/hmetin/these/solvers/ESBP_SEL/sat_symmetry/third_party/automorphism/saucy/saucy.h
 obj/src/Group.o: src/Group.cc include/cosy/Group.h include/cosy/Macros.h \
  include/cosy/Permutation.h include/cosy/Literal.h include/cosy/Logging.h \
  include/cosy/IntegralTypes.h include/cosy/IntType.h \
  include/cosy/Printer.h
-obj/src/CNFModel.o: src/CNFModel.cc include/cosy/CNFModel.h \
- include/cosy/Clause.h include/cosy/Literal.h include/cosy/Logging.h \
+obj/src/Order.o: src/Order.cc include/cosy/Order.h \
+ include/cosy/Assignment.h include/cosy/Literal.h include/cosy/Logging.h \
  include/cosy/IntegralTypes.h include/cosy/Macros.h \
- include/cosy/IntType.h include/cosy/Printer.h
+ include/cosy/IntType.h include/cosy/Bitset.h include/cosy/CNFModel.h \
+ include/cosy/Clause.h include/cosy/DisjointSets.h include/cosy/Group.h \
+ include/cosy/Permutation.h include/cosy/Orbits.h
 obj/src/CosyManager.o: src/CosyManager.cc include/cosy/CosyManager.h \
  include/cosy/Assignment.h include/cosy/Literal.h include/cosy/Logging.h \
  include/cosy/IntegralTypes.h include/cosy/Macros.h \
@@ -67,22 +68,12 @@ obj/src/CNFGraph.o: src/CNFGraph.cc include/cosy/CNFGraph.h \
 obj/src/Bitset.o: src/Bitset.cc include/cosy/Bitset.h \
  include/cosy/IntegralTypes.h include/cosy/Logging.h \
  include/cosy/Macros.h
-obj/src/Clause.o: src/Clause.cc include/cosy/Clause.h \
- include/cosy/Literal.h include/cosy/Logging.h \
- include/cosy/IntegralTypes.h include/cosy/Macros.h \
- include/cosy/IntType.h
 obj/src/ClauseInjector.o: src/ClauseInjector.cc \
  include/cosy/ClauseInjector.h include/cosy/Clause.h \
  include/cosy/Literal.h include/cosy/Logging.h \
  include/cosy/IntegralTypes.h include/cosy/Macros.h \
  include/cosy/IntType.h include/cosy/Stats.h include/cosy/Printer.h \
  include/cosy/Timer.h
-obj/src/Order.o: src/Order.cc include/cosy/Order.h \
- include/cosy/Assignment.h include/cosy/Literal.h include/cosy/Logging.h \
- include/cosy/IntegralTypes.h include/cosy/Macros.h \
- include/cosy/IntType.h include/cosy/Bitset.h include/cosy/CNFModel.h \
- include/cosy/Clause.h include/cosy/DisjointSets.h include/cosy/Group.h \
- include/cosy/Permutation.h include/cosy/Orbits.h
 obj/src/Stats.o: src/Stats.cc include/cosy/Stats.h \
  include/cosy/IntegralTypes.h include/cosy/Logging.h \
  include/cosy/Macros.h include/cosy/Printer.h include/cosy/Timer.h
@@ -94,9 +85,18 @@ obj/src/Orbits.o: src/Orbits.cc include/cosy/Orbits.h \
  include/cosy/DisjointSets.h include/cosy/Literal.h \
  include/cosy/Logging.h include/cosy/IntegralTypes.h \
  include/cosy/Macros.h include/cosy/IntType.h include/cosy/Permutation.h
+obj/src/SaucyReader.o: src/SaucyReader.cc include/cosy/SaucyReader.h \
+ include/cosy/Group.h include/cosy/Macros.h include/cosy/Permutation.h \
+ include/cosy/Literal.h include/cosy/Logging.h \
+ include/cosy/IntegralTypes.h include/cosy/IntType.h \
+ include/cosy/StreamBuffer.h
 obj/src/ColoredGraph.o: src/ColoredGraph.cc include/cosy/ColoredGraph.h \
  include/cosy/IntegralTypes.h include/cosy/Logging.h \
  include/cosy/Macros.h
+obj/src/CNFModel.o: src/CNFModel.cc include/cosy/CNFModel.h \
+ include/cosy/Clause.h include/cosy/Literal.h include/cosy/Logging.h \
+ include/cosy/IntegralTypes.h include/cosy/Macros.h \
+ include/cosy/IntType.h include/cosy/Printer.h
 obj/tests/units/SymmetryController.test.o: \
  tests/units/SymmetryController.test.cc include/cosy/SymmetryController.h \
  include/cosy/CosyManager.h include/cosy/Assignment.h \
@@ -114,18 +114,18 @@ obj/tests/units/SymmetryController.test.o: \
  include/cosy/AutomorphismBuilder.h \
  include/cosy/LiteralGraphNodeAdaptor.h include/cosy/AutomorphismFinder.h \
  include/cosy/ColoredGraph.h include/cosy/BlissAutomorphismFinder.h \
- /tmp/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/graph.hh \
- /tmp/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/kstack.hh \
- /tmp/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/defs.hh \
- /tmp/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/kqueue.hh \
- /tmp/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/heap.hh \
- /tmp/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/orbit.hh \
- /tmp/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/partition.hh \
- /tmp/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/graph.hh \
- /tmp/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/bignum.hh \
- /tmp/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/uintseqhash.hh \
+ /home/hmetin/these/solvers/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/graph.hh \
+ /home/hmetin/these/solvers/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/kstack.hh \
+ /home/hmetin/these/solvers/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/defs.hh \
+ /home/hmetin/these/solvers/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/kqueue.hh \
+ /home/hmetin/these/solvers/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/heap.hh \
+ /home/hmetin/these/solvers/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/orbit.hh \
+ /home/hmetin/these/solvers/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/partition.hh \
+ /home/hmetin/these/solvers/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/graph.hh \
+ /home/hmetin/these/solvers/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/bignum.hh \
+ /home/hmetin/these/solvers/ESBP_SEL/sat_symmetry/third_party/automorphism/bliss/uintseqhash.hh \
  include/cosy/SaucyAutomorphismFinder.h \
- /tmp/ESBP_SEL/sat_symmetry/third_party/automorphism/saucy/saucy.h
+ /home/hmetin/these/solvers/ESBP_SEL/sat_symmetry/third_party/automorphism/saucy/saucy.h
 obj/tests/units/Assignment.test.o: tests/units/Assignment.test.cc \
  include/cosy/Assignment.h include/cosy/Literal.h include/cosy/Logging.h \
  include/cosy/IntegralTypes.h include/cosy/Macros.h \

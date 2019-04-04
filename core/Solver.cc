@@ -624,7 +624,6 @@ void Solver::cancelUntil(int lvl) {
             assigns [x] = l_Undef;
             if (symmetry != nullptr)
                 symmetry->updateCancel(trail[c]);
-            updateCancelSEL(trail[c]);
 
             if (phase_saving > 1 || ((phase_saving == 1) && c > trail_lim.last())) {
                 polarity[x] = sign(trail[c]);
@@ -751,8 +750,8 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt,vec<Lit>&selectors, int& o
         for (int j = (p == lit_Undef) ? 0 : 1; j < c.size(); j++) {
             Lit q = c[j];
 
-            // if (level(var(q)) == 0 && forbid_units.find(var(q)) != forbid_units.end())
-            //     isSymmetry = true;
+            if (level(var(q)) == 0 && forbid_units.find(var(q)) != forbid_units.end())
+                isSymmetry = true;
 
             if (!seen[var(q)]) {
                 if (level(var(q)) == 0) {
@@ -977,7 +976,7 @@ void Solver::uncheckedEnqueue(Lit p, CRef from) {
         }
     }
 
-    updateNotifySEL(p);
+    // updateNotifySEL(p);
 }
 
 /*_________________________________________________________________________________________________
@@ -1165,11 +1164,9 @@ NextClause:
             assert(value(selClauses[watch])==l_False);
 
             assert(!ca[reason(selProp[currentclause])].symmetry());
-            assert(selGen[currentclause]->isActive());
 
             // create new learned clause
             selGen[currentclause]->getSymmetricalClause(ca[reason(selProp[currentclause])], symmetrical);
-
 
             minimizeClause(symmetrical);
             if(symmetrical.size() < 2){
@@ -1199,7 +1196,6 @@ NextClause:
             }
         }
     }
-
 /*** check for new symmetrical clauses ***/
     for(; confl == CRef_Undef && qhead_gen<trail.size(); ++qhead_gen, watchidx=0){ // do generator symmetry propagation
         Lit currentGenLit = trail[qhead_gen];
@@ -1236,19 +1232,14 @@ NextClause:
 
         for(; watchidx<watchEnd-watchStart; ++watchidx){
             SymGenerator* g = genWatches[watchStart+watchidx];
-            if (!g->isActive())
-                continue;
             assert(g->permutes(currentGenLit));
             int result = addSelClause(g, currentGenLit);
             if(result < 2){ // either conflict or unit clause
                 assert(!ca[reason_cgl].symmetry());
-
                 g->getSymmetricalClause(ca[reason_cgl], symmetrical);
                 minimizeClause(symmetrical);
 
                 if(symmetrical.size()<2){
-                    // DEBUG Ignore level 0
-                    continue;
                     assert(symmetrical.size()==1);
                     cancelUntil(0);
                     if(value(symmetrical[0])==l_Undef){ // unit clause
@@ -1571,7 +1562,6 @@ lbool Solver::search(int nof_conflicts) {
             if (learnt_clause.size() == 1) {
                 if (isSymmetry) {
                     forbid_units.insert(var(learnt_clause[0]));
-                    std::cout << "ESBP units " << PL(learnt_clause[0]) << std::endl;
                 }
                 uncheckedEnqueue(learnt_clause[0]);
                 nbUn++;
@@ -2025,18 +2015,25 @@ void Solver::prepareWatches(vec<Lit>& c){
 // NOTE: some clauses at level 0 have no unit clause as reason, so ugly code ahead
 void Solver::minimizeClause(vec<Lit>& cl){
     vec<int> minimizeTmpVec;
+    vec<Lit> copyCl;
+    copyCl.growTo(cl.size());
     minimizeTmpVec.growTo(cl.size());
     for(int i=0; i<cl.size(); ++i){
+        copyCl[i] = cl[i];
         int vcli = var(cl[i]);
         minimizeTmpVec[i]=vcli;
         assert(seen[vcli]==0);
         seen[vcli]=1; // mark as seen
     }
-    for(int i=0; i<cl.size() && cl.size()>1; ++i){
+
+    bool isSymmetry = false;
+    for(int i=0; i<cl.size() && cl.size()>1; ++i) {
         if(value(cl[i])!=l_False){
             continue;
         }
         if(level(var(cl[i]))==0){
+            if (forbid_units.find(var(cl[i])) != forbid_units.end())
+                isSymmetry = true;
             cl.swapErase(i);
             --i;
         }else if(reason(var(cl[i]))!=CRef_Undef){
@@ -2049,7 +2046,9 @@ void Solver::minimizeClause(vec<Lit>& cl){
                     break;
                 }
             }
-            if(allSeen){
+            if(allSeen) {
+                if (ca[reason(var(cl[i]))].symmetry())
+                    isSymmetry = true;
                 cl.swapErase(i);
                 --i;
             }
@@ -2057,6 +2056,14 @@ void Solver::minimizeClause(vec<Lit>& cl){
     }
     for(int i=0; i<minimizeTmpVec.size(); ++i){ // reset seen
         seen[minimizeTmpVec[i]]=0;
+    }
+
+    if (isSymmetry) {
+        cl.clear();
+        cl.growTo(copyCl.size());
+        for (int i=0; i<copyCl.size() ; i++) {
+            cl[i] = copyCl[i];
+        }
     }
 }
 
@@ -2181,23 +2188,6 @@ void Solver::initiateGenWatches(){
     }
 }
 
-void Solver::updateNotifySEL(Lit p) {
-    bool isESBPUnit = forbid_units.find(var(p)) != forbid_units.end();
-    for (int i=0; i<generators.size(); i++) {
-        SymGenerator *g = generators[i];
-        if (g->permutes(p))
-            g->updateNotify(p, decisionLevel(), isESBPUnit, assigns);
-    }
-}
-
-void Solver::updateCancelSEL(Lit p) {
-    for (int i=0; i<generators.size(); i++) {
-        SymGenerator *g = generators[i];
-        if (g->permutes(p))
-            g->updateCancel(p);
-    }
-}
-
 void Solver::notifyCNFUnits() {
     assert(decisionLevel() == 0);
 
@@ -2234,7 +2224,7 @@ CRef Solver::learntSymmetryClause(cosy::ClauseInjector::Type type, Lit p) {
             assert(ca[cr].symmetry());
             ca[cr].setLBD(computeLBD(ca[cr]));
             ca[cr].setOneWatched(false);
-            ca[cr].setSizeWithoutSelectors(0);  // I don't know how to put here !!!
+            // ca[cr].setSizeWithoutSelectors(0);  // I don't know how to put here !!!
             learnts.push(cr);
             attachClause(cr);
 
