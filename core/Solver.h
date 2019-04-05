@@ -371,7 +371,7 @@ protected:
     CRef     propagate        ();                                                      // Perform unit propagation. Returns possibly conflicting clause.
     CRef     propagateUnaryWatches(Lit p);                                                  // Perform propagation on unary watches of p, can find only conflicts
     void     cancelUntil      (int level);                                             // Backtrack until a certain level.
-    void     analyze          (CRef confl, vec<Lit>& out_learnt, vec<Lit> & selectors, int& out_btlevel,unsigned int &nblevels,unsigned int &szWithoutSelectors, bool &isSymmetry);    // (bt = backtrack)
+    void     analyze          (CRef confl, vec<Lit>& out_learnt, vec<Lit> & selectors, int& out_btlevel,unsigned int &nblevels,unsigned int &szWithoutSelectors, bool &isSymmetry, std::set<SymGenerator*>* comp);    // (bt = backtrack)
     void     analyzeFinal     (Lit p, vec<Lit>& out_conflict);                         // COULD THIS BE IMPLEMENTED BY THE ORDINARIY "analyze" BY SOME REASONABLE GENERALIZATION?
     bool     litRedundant     (Lit p, uint32_t abstract_levels);                       // (helper method for 'analyze()')
     lbool    search           (int nof_conflicts);                                     // Search for a given number of conflicts.
@@ -445,7 +445,7 @@ private:
 
     void minimizeClause(vec<Lit>& c); // minimize clause through self-subsumption
     void prepareWatches(vec<Lit>& c); // prepares watches of a (new) clause
-    CRef addClauseFromSymmetry(vec<Lit>& symmetrical); // @pre: clause is unit or conflicting. Bool return value is true if the symmetrical clause is unit or conflicting. CRef return value is the conflicting clause, or CRef_Undef if the symmetrical clause is not conflicting.
+    CRef addClauseFromSymmetry(const Clause& from, vec<Lit>& symmetrical); // @pre: clause is unit or conflicting. Bool return value is true if the symmetrical clause is unit or conflicting. CRef return value is the conflicting clause, or CRef_Undef if the symmetrical clause is not conflicting.
 
     // returns 0: conflict clause: added to learned clause store
     // returns 1: unit clause:     added to learned clause store

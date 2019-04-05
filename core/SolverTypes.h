@@ -51,6 +51,9 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 #ifndef Glucose_SolverTypes_h
 #define Glucose_SolverTypes_h
 
+#include <memory>
+#include <set>
+
 #include <assert.h>
 #include <stdint.h>
 #include <pthread.h>
@@ -151,15 +154,20 @@ inline lbool toLbool(int   v) { return lbool((uint8_t)v);  }
 // Clause -- a simple class for representing a clause:
 
 class Clause;
+class SymGenerator;
+
 typedef RegionAllocator<uint32_t>::Ref CRef;
 
 #define BITS_LBD 13
 #define BITS_SIZEWITHOUTSEL 18
-#define BITS_REALSIZE 21
+#define BITS_REALSIZE 20
 class Clause {
+    std::unique_ptr< std::set<SymGenerator*> > perms;
+
     struct {
       unsigned mark       : 2;
       unsigned learnt     : 1;
+      unsigned fsymmetry  : 1;
       unsigned symmetry   : 1;
       unsigned szWithoutSelectors : BITS_SIZEWITHOUTSEL;
       unsigned canbedel   : 1;
@@ -178,10 +186,12 @@ class Clause {
 
     // NOTE: This constructor cannot be used directly (doesn't allocate enough memory).
     template<class V>
-        Clause(const V& ps, int _extra_size, bool learnt, bool symmetry) {
+    Clause(const V& ps, int _extra_size, bool learnt, bool fsymmetry, bool symmetry,
+           std::unique_ptr<std::set<SymGenerator*>>& p) : perms(std::move(p)) {
 	assert(_extra_size < (1<<2));
         header.mark      = 0;
         header.learnt    = learnt;
+        header.fsymmetry = fsymmetry;
         header.symmetry  = symmetry;
         header.extra_size = _extra_size;
         header.reloced   = 0;
@@ -225,6 +235,8 @@ public:
     void         pop         ()              { shrink(1); }
     bool         learnt      ()      const   { return header.learnt; }
     bool         symmetry    ()      const   { return header.symmetry; }
+    bool         fsymmetry   ()      const   { return header.fsymmetry; }
+    std::set<SymGenerator*>* scompat()   const   { return perms.get(); }
     bool         has_extra   ()      const   { return header.extra_size > 0; }
     uint32_t     mark        ()      const   { return header.mark; }
     void         mark        (uint32_t m)    { header.mark = m; }
@@ -288,7 +300,8 @@ class ClauseAllocator : public RegionAllocator<uint32_t>
         RegionAllocator<uint32_t>::moveTo(to); }
 
     template<class Lits>
-        CRef alloc(const Lits& ps, bool learnt = false, bool imported = false, bool symmetry = false)
+    CRef alloc(const Lits& ps, bool learnt = false, bool imported = false, bool fsymmetry = false,
+	       bool symmetry = false, std::unique_ptr<std::set<SymGenerator*>>&& perms = nullptr)
     {
         assert(sizeof(Lit)      == sizeof(uint32_t));
         assert(sizeof(float)    == sizeof(uint32_t));
@@ -296,7 +309,7 @@ class ClauseAllocator : public RegionAllocator<uint32_t>
         bool use_extra = learnt | extra_clause_field;
         int extra_size = imported?3:(use_extra?1:0);
         CRef cid = RegionAllocator<uint32_t>::alloc(clauseWord32Size(ps.size(), extra_size));
-        new (lea(cid)) Clause(ps, extra_size, learnt, symmetry);
+        new (lea(cid)) Clause(ps, extra_size, learnt, fsymmetry, symmetry, perms);
 
         return cid;
     }
@@ -320,7 +333,9 @@ class ClauseAllocator : public RegionAllocator<uint32_t>
 
         if (c.reloced()) { cr = c.relocation(); return; }
 
-        cr = to.alloc(c, c.learnt(), c.wasImported(), c.symmetry());
+        std::unique_ptr<std::set<SymGenerator*>> compatibility = c.symmetry() ? std::unique_ptr<std::set<SymGenerator*>>(new std::set<SymGenerator*>(c.scompat()->begin(), c.scompat()->end())) : nullptr;
+
+        cr = to.alloc(c, c.learnt(), c.wasImported(), c.fsymmetry(), c.symmetry(), std::move(compatibility));
         c.relocate(cr);
 
         // DEBUG
@@ -548,6 +563,22 @@ public:
             }
             addImage(from[i],to[i]);
         }
+    }
+
+    bool stabilize(const vec<Lit>& clause) {
+        for (int i=0; i<clause.size(); i++) {
+            if (!permutes(clause[i]))
+                continue;
+
+            Lit img = getImage(clause[i]);
+            int j;
+            for (j=0; j<clause.size(); j++)
+                if (clause[j] == img)
+                    break;
+            if (j == clause.size())
+                return false;
+        }
+        return true;
     }
 
     void print(){
