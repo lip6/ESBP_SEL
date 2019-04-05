@@ -57,6 +57,7 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 
 #define PL(l) (sign(l)?"-":"") << var(l)+1
 
+
 using namespace Glucose;
 
 //=================================================================================================
@@ -881,10 +882,12 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt,vec<Lit>&selectors, int& o
 
 // Check if 'p' can be removed. 'abstract_levels' is used to abort early if the algorithm is
 // visiting literals at levels that cannot be removed later.
-
 bool Solver::litRedundant(Lit p, uint32_t abstract_levels) {
     analyze_stack.clear();
     analyze_stack.push(p);
+
+    bool esbp = false;
+
     int top = analyze_toclear.size();
     while (analyze_stack.size() > 0) {
         assert(reason(var(analyze_stack.last())) != CRef_Undef);
@@ -901,10 +904,15 @@ bool Solver::litRedundant(Lit p, uint32_t abstract_levels) {
             if (!seen[var(p)]) {
                 if (level(var(p)) > 0) {
                     if (reason(var(p)) != CRef_Undef && (abstractLevel(var(p)) & abstract_levels) != 0) {
+                        if (ca[reason(var(p))].symmetry())
+                            esbp = true;
                         seen[var(p)] = 1;
                         analyze_stack.push(p);
                         analyze_toclear.push(p);
                     } else {
+                        if (forbid_units.find(var(p)) != forbid_units.end())
+                            esbp = true;
+
                         for (int j = top; j < analyze_toclear.size(); j++)
                             seen[var(analyze_toclear[j])] = 0;
                         analyze_toclear.shrink(analyze_toclear.size() - top);
@@ -915,7 +923,7 @@ bool Solver::litRedundant(Lit p, uint32_t abstract_levels) {
         }
     }
 
-    return true;
+    return !esbp;
 }
 
 
@@ -1784,10 +1792,7 @@ lbool Solver::solve_(bool do_simp, bool turn_off_simp) // Parameters are useless
     }else if (status == l_False && conflict.size() == 0)
         ok = false;
 
-
-
     cancelUntil(0);
-
 
     double finalTime = cpuTime();
     if(status==l_True) {
