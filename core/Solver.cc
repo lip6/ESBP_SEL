@@ -1842,10 +1842,7 @@ lbool Solver::solve_(bool do_simp, bool turn_off_simp) // Parameters are useless
     }else if (status == l_False && conflict.size() == 0)
         ok = false;
 
-
-
     cancelUntil(0);
-
 
     double finalTime = cpuTime();
     if(status==l_True) {

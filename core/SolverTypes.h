@@ -187,7 +187,7 @@ class Clause {
     // NOTE: This constructor cannot be used directly (doesn't allocate enough memory).
     template<class V>
     Clause(const V& ps, int _extra_size, bool learnt, bool fsymmetry, bool symmetry,
-           std::unique_ptr<std::set<SymGenerator*>>& p) : perms(std::move(p)) {
+           std::unique_ptr<std::set<SymGenerator*>> p) : perms(std::move(p)) {
 	assert(_extra_size < (1<<2));
         header.mark      = 0;
         header.learnt    = learnt;
@@ -301,7 +301,7 @@ class ClauseAllocator : public RegionAllocator<uint32_t>
 
     template<class Lits>
     CRef alloc(const Lits& ps, bool learnt = false, bool imported = false, bool fsymmetry = false,
-	       bool symmetry = false, std::unique_ptr<std::set<SymGenerator*>>&& perms = nullptr)
+	       bool symmetry = false, std::unique_ptr<std::set<SymGenerator*>> perms = nullptr)
     {
         assert(sizeof(Lit)      == sizeof(uint32_t));
         assert(sizeof(float)    == sizeof(uint32_t));
@@ -309,7 +309,7 @@ class ClauseAllocator : public RegionAllocator<uint32_t>
         bool use_extra = learnt | extra_clause_field;
         int extra_size = imported?3:(use_extra?1:0);
         CRef cid = RegionAllocator<uint32_t>::alloc(clauseWord32Size(ps.size(), extra_size));
-        new (lea(cid)) Clause(ps, extra_size, learnt, fsymmetry, symmetry, perms);
+        new (lea(cid)) Clause(ps, extra_size, learnt, fsymmetry, symmetry, std::move(perms));
 
         return cid;
     }
@@ -324,6 +324,7 @@ class ClauseAllocator : public RegionAllocator<uint32_t>
     void free(CRef cid)
     {
         Clause& c = operator[](cid);
+        c.perms = nullptr;
         RegionAllocator<uint32_t>::free(clauseWord32Size(c.size(), c.has_extra()));
     }
 
@@ -333,14 +334,12 @@ class ClauseAllocator : public RegionAllocator<uint32_t>
 
         if (c.reloced()) { cr = c.relocation(); return; }
 
-        std::unique_ptr<std::set<SymGenerator*>> compatibility = c.symmetry() ? std::unique_ptr<std::set<SymGenerator*>>(new std::set<SymGenerator*>(c.scompat()->begin(), c.scompat()->end())) : nullptr;
 
-        cr = to.alloc(c, c.learnt(), c.wasImported(), c.fsymmetry(), c.symmetry(), std::move(compatibility));
+        //std::unique_ptr<std::set<SymGenerator*>> compatibility = c.symmetry() ? std::unique_ptr<std::set<SymGenerator*>>(new std::set<SymGenerator*>(c.scompat()->begin(), c.scompat()->end())) : nullptr;
+
+        cr = to.alloc(c, c.learnt(), c.wasImported(), c.fsymmetry(), c.symmetry(), std::move(c.perms));
         c.relocate(cr);
 
-        // DEBUG
-        if (c.symmetry())
-            assert(to[cr].symmetry());
 
         // Copy extra data-fields:
         // (This could be cleaned-up. Generalize Clause-constructor to be applicable here instead?)
