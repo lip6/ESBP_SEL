@@ -575,7 +575,7 @@ inline unsigned int Solver::computeLBD(const Clause &c) {
  * Minimisation with binary reolution
  ******************************************************************/
 void Solver::minimisationWithBinaryResolution(vec<Lit> &out_learnt) {
-
+    return;
     // Find the LBD measure
     unsigned int lbd = computeLBD(out_learnt);
     Lit p = ~out_learnt[0];
@@ -833,9 +833,9 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt,vec<Lit>&selectors, int& o
       Then, we reduce clauses with small LBD.
       Otherwise, this can be useless
      */
-    if (!incremental && out_learnt.size() <= lbSizeMinimizingClause) {
-        minimisationWithBinaryResolution(out_learnt);
-    }
+    // if (!incremental && out_learnt.size() <= lbSizeMinimizingClause) {
+    //     minimisationWithBinaryResolution(out_learnt);
+    // }
     // Find correct backtrack level:
     //
     if (out_learnt.size() == 1)
@@ -904,26 +904,37 @@ bool Solver::litRedundant(Lit p, uint32_t abstract_levels) {
             if (!seen[var(p)]) {
                 if (level(var(p)) > 0) {
                     if (reason(var(p)) != CRef_Undef && (abstractLevel(var(p)) & abstract_levels) != 0) {
-                        if (ca[reason(var(p))].symmetry())
+                        if (ca[reason(var(p))].symmetry()) {
                             esbp = true;
+                            break;
+                        }
                         seen[var(p)] = 1;
                         analyze_stack.push(p);
                         analyze_toclear.push(p);
                     } else {
-                        if (forbid_units.find(var(p)) != forbid_units.end())
-                            esbp = true;
-
                         for (int j = top; j < analyze_toclear.size(); j++)
                             seen[var(analyze_toclear[j])] = 0;
                         analyze_toclear.shrink(analyze_toclear.size() - top);
                         return false;
+                    }
+                } else {
+                    if (forbid_units.find(var(p)) != forbid_units.end()) {
+                        esbp = true;
+                        break;
                     }
                 }
             }
         }
     }
 
-    return !esbp;
+    if (esbp) {
+        for (int j = top; j < analyze_toclear.size(); j++)
+            seen[var(analyze_toclear[j])] = 0;
+        analyze_toclear.shrink(analyze_toclear.size() - top);
+        return false;
+    }
+
+    return true;
 }
 
 
@@ -1170,7 +1181,6 @@ NextClause:
 
             // unit or conflicting clause
             assert(value(selClauses[watch])==l_False);
-
             assert(!ca[reason(selProp[currentclause])].symmetry());
 
             // create new learned clause
@@ -1204,6 +1214,7 @@ NextClause:
             }
         }
     }
+
 /*** check for new symmetrical clauses ***/
     for(; confl == CRef_Undef && qhead_gen<trail.size(); ++qhead_gen, watchidx=0){ // do generator symmetry propagation
         Lit currentGenLit = trail[qhead_gen];
@@ -2037,8 +2048,10 @@ void Solver::minimizeClause(vec<Lit>& cl){
             continue;
         }
         if(level(var(cl[i]))==0){
-            if (forbid_units.find(var(cl[i])) != forbid_units.end())
+            if (forbid_units.find(var(cl[i])) != forbid_units.end()) {
                 isSymmetry = true;
+                break;
+            }
             cl.swapErase(i);
             --i;
         }else if(reason(var(cl[i]))!=CRef_Undef){
@@ -2052,8 +2065,10 @@ void Solver::minimizeClause(vec<Lit>& cl){
                 }
             }
             if(allSeen) {
-                if (ca[reason(var(cl[i]))].symmetry())
+                if (ca[reason(var(cl[i]))].symmetry()) {
                     isSymmetry = true;
+                    break;
+                }
                 cl.swapErase(i);
                 --i;
             }
