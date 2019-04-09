@@ -104,7 +104,10 @@ public:
     std::unique_ptr<cosy::SymmetryController<Lit>> symmetry;
     CRef learntSymmetryClause(cosy::ClauseInjector::Type type, Lit p);
     void notifyCNFUnits();
+    void computeStabilizerLevelZero();
+
     std::unordered_set<Var> forbid_units;
+    std::unordered_set<SymGenerator*> stabilizer;
 
     void updateNotifySEL(Lit p);
     void updateCancelSEL(Lit p);

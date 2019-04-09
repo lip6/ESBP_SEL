@@ -707,7 +707,6 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt,vec<Lit>&selectors, int& o
 
     bool fsym = ca[confl].fsymmetry();
     std::vector<CRef> conf_clauses;
-    std::vector<Lit> esbp_units;
 
     // Generate conflict clause:
     //
@@ -758,7 +757,6 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt,vec<Lit>&selectors, int& o
 
             if (level(var(q)) == 0 && forbid_units.find(var(q)) != forbid_units.end()) {
                 isSymmetry = true;
-                esbp_units.push_back(q);
             }
 
             if (!seen[var(q)]) {
@@ -840,9 +838,11 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt,vec<Lit>&selectors, int& o
       Then, we reduce clauses with small LBD.
       Otherwise, this can be useless
      */
-    if (!incremental && out_learnt.size() <= lbSizeMinimizingClause) {
-        minimisationWithBinaryResolution(out_learnt);
-    }
+
+    // if (!incremental && out_learnt.size() <= lbSizeMinimizingClause) {
+    //     minimisationWithBinaryResolution(out_learnt);
+    // }
+
     // Find correct backtrack level:
     //
     if (out_learnt.size() == 1)
@@ -880,14 +880,9 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt,vec<Lit>&selectors, int& o
         lastDecisionLevel.clear();
     }
 
-
-
     for (int j = 0; j < analyze_toclear.size(); j++) seen[var(analyze_toclear[j])] = 0; // ('seen[]' is now cleared)
     for (int j = 0; j < selectors.size(); j++) seen[var(selectors[j])] = 0;
 
-
-    for (Lit l : esbp_units)
-        out_learnt.push(l);
 
     if (!isSymmetry)
         return;
@@ -924,6 +919,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt,vec<Lit>&selectors, int& o
                 break;
         }
     }
+
     for (int i=0; i<generators.size(); i++) {
         SymGenerator *g = generators[i];
         if(comp->find(g) != comp->end())
@@ -943,6 +939,7 @@ bool Solver::litRedundant(Lit p, uint32_t abstract_levels) {
     analyze_stack.push(p);
     int top = analyze_toclear.size();
     bool esbp = false;
+
     while (analyze_stack.size() > 0) {
         assert(reason(var(analyze_stack.last())) != CRef_Undef);
         Clause& c = ca[reason(var(analyze_stack.last()))];
@@ -958,25 +955,37 @@ bool Solver::litRedundant(Lit p, uint32_t abstract_levels) {
             if (!seen[var(p)]) {
                 if (level(var(p)) > 0) {
                     if (reason(var(p)) != CRef_Undef && (abstractLevel(var(p)) & abstract_levels) != 0) {
-                        if (ca[reason(var(p))].symmetry())
+                        if (ca[reason(var(p))].symmetry()) {
                             esbp = true;
+                            break;
+                        }
                         seen[var(p)] = 1;
                         analyze_stack.push(p);
                         analyze_toclear.push(p);
                     } else {
-                        if (forbid_units.find(var(p)) != forbid_units.end())
-                            esbp = true;
                         for (int j = top; j < analyze_toclear.size(); j++)
                             seen[var(analyze_toclear[j])] = 0;
                         analyze_toclear.shrink(analyze_toclear.size() - top);
                         return false;
+                    }
+                } else {
+                    if (forbid_units.find(var(p)) != forbid_units.end()) {
+                        esbp = true;
+                        break;
                     }
                 }
             }
         }
     }
 
-    return !esbp;
+    if (esbp) {
+        for (int j = top; j < analyze_toclear.size(); j++)
+            seen[var(analyze_toclear[j])] = 0;
+        analyze_toclear.shrink(analyze_toclear.size() - top);
+        return false;
+    }
+
+    return true;
 }
 
 
@@ -1172,6 +1181,7 @@ NextClause:
     }
 
     vec<Lit> symmetrical;
+
 /*** first check existing symmetrical clauses ***/
     for(; confl == CRef_Undef && qhead_sel<trail.size(); ++qhead_sel){
         Lit prop = trail[qhead_sel];
@@ -1222,12 +1232,16 @@ NextClause:
             // unit or conflicting clause
             assert(value(selClauses[watch])==l_False);
 
+            const Clause& c = ca[reason(selProp[currentclause])];
+            SymGenerator *g = selGen[currentclause];
+            if (c.symmetry() && (stabilizer.find(g) == stabilizer.end() || c.scompat()->find(g) == c.scompat()->end()))
+                continue;
+
             // create new learned clause
             selGen[currentclause]->getSymmetricalClause(ca[reason(selProp[currentclause])], symmetrical);
 
             minimizeClause(symmetrical);
-            if(symmetrical.size() < 2){
-                assert(symmetrical.size()==1);
+            if(symmetrical.size() < 2){                assert(symmetrical.size()==1);
                 cancelUntil(0);
                 if(value(symmetrical[0])==l_Undef){ // unit clause
                     ++symselprops;
@@ -1253,6 +1267,7 @@ NextClause:
             }
         }
     }
+
 /*** check for new symmetrical clauses ***/
     for(; confl == CRef_Undef && qhead_gen<trail.size(); ++qhead_gen, watchidx=0){ // do generator symmetry propagation
         Lit currentGenLit = trail[qhead_gen];
@@ -1284,13 +1299,15 @@ NextClause:
             continue; // choice literal
         }
 
-        // if (ca[reason_cgl].symmetry())
-        //     continue;  // Clause generated or deduced by ESBP
-
         for(; watchidx<watchEnd-watchStart; ++watchidx) {
             SymGenerator* g = genWatches[watchStart+watchidx];
 
             assert(g->permutes(currentGenLit));
+            const Clause& c = ca[reason_cgl];
+
+            if (c.symmetry() && (stabilizer.find(g) == stabilizer.end() || c.scompat()->find(g) == c.scompat()->end()))
+                continue;
+
             int result = addSelClause(g, currentGenLit);
             if(result < 2){ // either conflict or unit clause
                 g->getSymmetricalClause(ca[reason_cgl], symmetrical);
@@ -1701,6 +1718,9 @@ lbool Solver::search(int nof_conflicts) {
                 }
             }
 
+            if (decisionLevel() == 0)
+                computeStabilizerLevelZero();
+
             // Increase decision level and enqueue 'next'
             newDecisionLevel();
             uncheckedEnqueue(next);
@@ -2076,11 +2096,9 @@ void Solver::minimizeClause(vec<Lit>& cl){
     for(int i=0; i<cl.size(); ++i){
         copyCl[i] = cl[i];
         int vcli = var(cl[i]);
-        if (!seen[vcli]) {
-            minimizeTmpVec[i]=vcli;
-            assert(seen[vcli]==0);
-            seen[vcli]=1; // mark as seen
-        }
+        minimizeTmpVec[i]=vcli;
+        assert(seen[vcli]==0);
+        seen[vcli]=1; // mark as seen
     }
 
     bool isSymmetry = false;
@@ -2155,9 +2173,6 @@ int Solver::addSelClause(SymGenerator* g, Lit l){
     assert(reason_l != CRef_Undef);
 
     const Clause& c_l = ca[reason_l];
-    if (c_l.symmetry() && c_l.scompat()->find(g) == c_l.scompat()->end())
-        return 2;
-
     for(int i=0; i<c_l.size(); ++i){
         if(value(g->getImage(c_l[i])) == l_True) { // unknown lits, keep in clause
             return 2;
@@ -2247,6 +2262,17 @@ void Solver::initiateGenWatches(){
         genWatchIndices.push(genWatches.size());
     }
 }
+
+void Solver::computeStabilizerLevelZero() {
+    assert(decisionLevel() == 0);
+    stabilizer.clear();
+    for (int i=0; i<generators.size(); i++) {
+        SymGenerator *g = generators[i];
+        if (g->stabilize(trail))
+            stabilizer.insert(g);
+    }
+}
+
 
 void Solver::notifyCNFUnits() {
     assert(decisionLevel() == 0);
