@@ -187,7 +187,7 @@ class Clause {
     // NOTE: This constructor cannot be used directly (doesn't allocate enough memory).
     template<class V>
     Clause(const V& ps, int _extra_size, bool learnt, bool fsymmetry, bool symmetry,
-           std::unique_ptr<std::set<SymGenerator*>>& p) : perms(std::move(p)) {
+           std::unique_ptr<std::set<SymGenerator*>> p) : perms(std::move(p)) {
 	assert(_extra_size < (1<<2));
         header.mark      = 0;
         header.learnt    = learnt;
@@ -301,7 +301,7 @@ class ClauseAllocator : public RegionAllocator<uint32_t>
 
     template<class Lits>
     CRef alloc(const Lits& ps, bool learnt = false, bool imported = false, bool fsymmetry = false,
-	       bool symmetry = false, std::unique_ptr<std::set<SymGenerator*>>&& perms = nullptr)
+	       bool symmetry = false, std::unique_ptr<std::set<SymGenerator*>> perms = nullptr)
     {
         assert(sizeof(Lit)      == sizeof(uint32_t));
         assert(sizeof(float)    == sizeof(uint32_t));
@@ -309,7 +309,7 @@ class ClauseAllocator : public RegionAllocator<uint32_t>
         bool use_extra = learnt | extra_clause_field;
         int extra_size = imported?3:(use_extra?1:0);
         CRef cid = RegionAllocator<uint32_t>::alloc(clauseWord32Size(ps.size(), extra_size));
-        new (lea(cid)) Clause(ps, extra_size, learnt, fsymmetry, symmetry, perms);
+        new (lea(cid)) Clause(ps, extra_size, learnt, fsymmetry, symmetry, std::move(perms));
 
         return cid;
     }
@@ -324,6 +324,7 @@ class ClauseAllocator : public RegionAllocator<uint32_t>
     void free(CRef cid)
     {
         Clause& c = operator[](cid);
+        c.perms = nullptr;
         RegionAllocator<uint32_t>::free(clauseWord32Size(c.size(), c.has_extra()));
     }
 
@@ -333,14 +334,12 @@ class ClauseAllocator : public RegionAllocator<uint32_t>
 
         if (c.reloced()) { cr = c.relocation(); return; }
 
-        std::unique_ptr<std::set<SymGenerator*>> compatibility = c.symmetry() ? std::unique_ptr<std::set<SymGenerator*>>(new std::set<SymGenerator*>(c.scompat()->begin(), c.scompat()->end())) : nullptr;
 
-        cr = to.alloc(c, c.learnt(), c.wasImported(), c.fsymmetry(), c.symmetry(), std::move(compatibility));
+        //std::unique_ptr<std::set<SymGenerator*>> compatibility = c.symmetry() ? std::unique_ptr<std::set<SymGenerator*>>(new std::set<SymGenerator*>(c.scompat()->begin(), c.scompat()->end())) : nullptr;
+
+        cr = to.alloc(c, c.learnt(), c.wasImported(), c.fsymmetry(), c.symmetry(), std::move(c.perms));
         c.relocate(cr);
 
-        // DEBUG
-        if (c.symmetry())
-            assert(to[cr].symmetry());
 
         // Copy extra data-fields:
         // (This could be cleaned-up. Generalize Clause-constructor to be applicable here instead?)
@@ -528,9 +527,6 @@ struct SymGenerator { // TODO: make the memory footprint smaller by not storing 
 private:
     int offset;
     vec<Lit> image; // image[v-offset] is the image of mkLit(v) under this generator
-
-    vec<Lit> breakUnits;
-    int breakUnitsIndex;
     Lit reasonOfBreaked;
 
     void addImage(Lit from, Lit to){
@@ -540,7 +536,7 @@ private:
     }
 
 public:
-    SymGenerator(vec<Lit>& from, vec<Lit>& to) : breakUnitsIndex(0), reasonOfBreaked(lit_Undef) {
+    SymGenerator(vec<Lit>& from, vec<Lit>& to) : reasonOfBreaked(lit_Undef) {
         assert(from.size()==to.size());
         offset = INT_MAX;
         int maxVar = INT_MIN;
@@ -571,17 +567,8 @@ public:
 
 
     /* ESBP Compatibility */
-    void updateNotify(Lit l, int level, bool isUnitESBP, const vec<lbool>& assigns) {
-        if (level == 0 && isUnitESBP) {
-            breakUnits.push(l);
-            for (; breakUnitsIndex < breakUnits.size(); breakUnitsIndex++) {
-                Var p = var(breakUnits[breakUnitsIndex]);
-                Var sym = var(getImage(breakUnits[breakUnitsIndex]));
-
-                if (assigns[p] != assigns[sym])
-                    break;
-            }
-        }
+    void updateNotify(Lit l) {
+        notifyReasonOfBreaked(l);
     }
 
     void updateCancel(Lit l) {
@@ -599,13 +586,10 @@ public:
     }
 
 
-    bool isActive() const { return isStab() && isStableLevelZero(); }
+    bool isActive() const { return isStab(); }
 
     bool isStab() const { return reasonOfBreaked == lit_Undef; }
 
-    bool isStableLevelZero() const {
-        return breakUnits.size() == 0 ||  breakUnitsIndex == breakUnits.size();
-    }
 
     bool stabilize(const vec<Lit>& clause) {
         for (int i=0; i<clause.size(); i++) {

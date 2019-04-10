@@ -68,8 +68,6 @@ static const char* _cred = "CORE -- REDUCE";
 static const char* _cm = "CORE -- MINIMIZE";
 
 
-
-
 static DoubleOption opt_K(_cr, "K", "The constant used to force restart", 0.8, DoubleRange(0, false, 1, false));
 static DoubleOption opt_R(_cr, "R", "The constant used to block restart", 1.4, DoubleRange(1, false, 5, false));
 static IntOption opt_size_lbd_queue(_cr, "szLBDQueue", "The size of moving average for LBD (restarts)", 50, IntRange(10, INT32_MAX));
@@ -757,8 +755,9 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt,vec<Lit>&selectors, int& o
         for (int j = (p == lit_Undef) ? 0 : 1; j < c.size(); j++) {
             Lit q = c[j];
 
-            if (level(var(q)) == 0 && forbid_units.find(var(q)) != forbid_units.end())
+            if (level(var(q)) == 0 && forbid_units.find(var(q)) != forbid_units.end()) {
                 isSymmetry = true;
+            }
 
             if (!seen[var(q)]) {
                 if (level(var(q)) == 0) {
@@ -839,9 +838,11 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt,vec<Lit>&selectors, int& o
       Then, we reduce clauses with small LBD.
       Otherwise, this can be useless
      */
-    if (!incremental && out_learnt.size() <= lbSizeMinimizingClause) {
-        minimisationWithBinaryResolution(out_learnt);
-    }
+
+    // if (!incremental && out_learnt.size() <= lbSizeMinimizingClause) {
+    //     minimisationWithBinaryResolution(out_learnt);
+    // }
+
     // Find correct backtrack level:
     //
     if (out_learnt.size() == 1)
@@ -879,10 +880,9 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt,vec<Lit>&selectors, int& o
         lastDecisionLevel.clear();
     }
 
-
-
     for (int j = 0; j < analyze_toclear.size(); j++) seen[var(analyze_toclear[j])] = 0; // ('seen[]' is now cleared)
     for (int j = 0; j < selectors.size(); j++) seen[var(selectors[j])] = 0;
+
 
     if (!isSymmetry)
         return;
@@ -919,6 +919,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt,vec<Lit>&selectors, int& o
                 break;
         }
     }
+
     for (int i=0; i<generators.size(); i++) {
         SymGenerator *g = generators[i];
         if(comp->find(g) != comp->end())
@@ -937,6 +938,8 @@ bool Solver::litRedundant(Lit p, uint32_t abstract_levels) {
     analyze_stack.clear();
     analyze_stack.push(p);
     int top = analyze_toclear.size();
+    bool esbp = false;
+
     while (analyze_stack.size() > 0) {
         assert(reason(var(analyze_stack.last())) != CRef_Undef);
         Clause& c = ca[reason(var(analyze_stack.last()))];
@@ -952,6 +955,10 @@ bool Solver::litRedundant(Lit p, uint32_t abstract_levels) {
             if (!seen[var(p)]) {
                 if (level(var(p)) > 0) {
                     if (reason(var(p)) != CRef_Undef && (abstractLevel(var(p)) & abstract_levels) != 0) {
+                        if (ca[reason(var(p))].symmetry()) {
+                            esbp = true;
+                            break;
+                        }
                         seen[var(p)] = 1;
                         analyze_stack.push(p);
                         analyze_toclear.push(p);
@@ -961,9 +968,21 @@ bool Solver::litRedundant(Lit p, uint32_t abstract_levels) {
                         analyze_toclear.shrink(analyze_toclear.size() - top);
                         return false;
                     }
+                } else {
+                    if (forbid_units.find(var(p)) != forbid_units.end()) {
+                        esbp = true;
+                        break;
+                    }
                 }
             }
         }
+    }
+
+    if (esbp) {
+        for (int j = top; j < analyze_toclear.size(); j++)
+            seen[var(analyze_toclear[j])] = 0;
+        analyze_toclear.shrink(analyze_toclear.size() - top);
+        return false;
     }
 
     return true;
@@ -1018,9 +1037,9 @@ void Solver::uncheckedEnqueue(Lit p, CRef from) {
     trail.push_(p);
 
     if (decisionLevel() == 0 && from != CRef_Undef) {
-        const Clause& clause = ca[from];
-        for (int i=0; i<clause.size(); i++) {
-            if (forbid_units.find(var(clause[i])) != forbid_units.end()) {
+        const Clause& c = ca[from];
+        for (int i=0; i<c.size(); i++) {
+            if (forbid_units.find(var(c[i])) != forbid_units.end()) {
                 forbid_units.insert(var(p));
                 break;
             }
@@ -1214,17 +1233,16 @@ NextClause:
             // unit or conflicting clause
             assert(value(selClauses[watch])==l_False);
 
-            if (!selGen[currentclause]->isActive())
+            const Clause& c = ca[reason(selProp[currentclause])];
+            SymGenerator *g = selGen[currentclause];
+            if (c.symmetry() && (stabilizer.find(g) == stabilizer.end() || !g->isActive()))
                 continue;
 
             // create new learned clause
             selGen[currentclause]->getSymmetricalClause(ca[reason(selProp[currentclause])], symmetrical);
 
-
             minimizeClause(symmetrical);
-            if(symmetrical.size() < 2){
-                assert(false);
-                assert(symmetrical.size()==1);
+            if(symmetrical.size() < 2){                assert(symmetrical.size()==1);
                 cancelUntil(0);
                 if(value(symmetrical[0])==l_Undef){ // unit clause
                     ++symselprops;
@@ -1240,7 +1258,7 @@ NextClause:
             prepareWatches(symmetrical);
 
             assert(value(symmetrical[1])==l_False);
-            confl = addClauseFromSymmetry(symmetrical);
+            confl = addClauseFromSymmetry(ca[reason(selProp[currentclause])], symmetrical);
             if(confl==CRef_Undef){ // unit clause
                 ++symselprops;
                 goto StartPropagate; // TODO: fix useless iteration over previous watches (i)
@@ -1260,9 +1278,9 @@ NextClause:
         int watchEnd = genWatchIndices[var(currentGenLit)+1];
 
         if(level(var(currentGenLit))==0){ // NOTE: special purpose level 0 method needed as not all level 0 propagations have a reason clause attached to it
-            assert(decisionLevel()==0);
             if (forbid_units.find(var(currentGenLit)) != forbid_units.end())
                 continue;
+            assert(decisionLevel()==0);
             for(int i=watchStart; i<watchEnd; ++i){
                 Lit symlit=genWatches[i]->getImage(currentGenLit);
                 if(value(symlit)==l_Undef){ // unit clause
@@ -1282,20 +1300,21 @@ NextClause:
             continue; // choice literal
         }
 
-        for(; watchidx<watchEnd-watchStart; ++watchidx){
+        for(; watchidx<watchEnd-watchStart; ++watchidx) {
             SymGenerator* g = genWatches[watchStart+watchidx];
+
             assert(g->permutes(currentGenLit));
-            if (!g->isActive())
+            const Clause& c = ca[reason_cgl];
+
+            if (c.symmetry() && (stabilizer.find(g) == stabilizer.end() || !g->isActive()))
                 continue;
+
             int result = addSelClause(g, currentGenLit);
             if(result < 2){ // either conflict or unit clause
-                // assert(!ca[reason_cgl].symmetry());
-
-                g->getSymmetricalClause(ca[reason_cgl],symmetrical);
+                g->getSymmetricalClause(ca[reason_cgl], symmetrical);
                 minimizeClause(symmetrical);
+
                 if(symmetrical.size()<2){
-                    // DEBUG Ignore level 0
-                    continue;
                     assert(symmetrical.size()==1);
                     cancelUntil(0);
                     if(value(symmetrical[0])==l_Undef){ // unit clause
@@ -1311,7 +1330,7 @@ NextClause:
                 assert(symmetrical.size()>1);
                 prepareWatches(symmetrical);
                 assert(value(symmetrical[1])==l_False);
-                confl = addClauseFromSymmetry(symmetrical);
+                confl = addClauseFromSymmetry(ca[reason_cgl], symmetrical);
 
                 assert(result==0 | confl==CRef_Undef); // propagating result should lead to undef clause
                 // NOTE: it is possible that (confl==CRef_Undef) & (result==0), if the symmetrical clause was a unit clause at some level, but has been made conflicting at a higher level. We treat this as a unit clause
@@ -1616,10 +1635,10 @@ lbool Solver::search(int nof_conflicts) {
             }
 
             if (learnt_clause.size() == 1) {
-                if (isSymmetry)
+                if (isSymmetry) {
                     forbid_units.insert(var(learnt_clause[0]));
+                }
                 uncheckedEnqueue(learnt_clause[0]);
-
                 nbUn++;
                 parallelExportUnaryClause(learnt_clause[0]);
             } else {
@@ -1699,6 +1718,9 @@ lbool Solver::search(int nof_conflicts) {
                     return l_True;
                 }
             }
+
+            if (decisionLevel() == 0)
+                computeStabilizerLevelZero();
 
             // Increase decision level and enqueue 'next'
             newDecisionLevel();
@@ -1820,7 +1842,7 @@ lbool Solver::solve_(bool do_simp, bool turn_off_simp) // Parameters are useless
     while (status == l_Undef){
       status = search(0); // the parameter is useless in glucose, kept to allow modifications
 
-        if (!withinBudget()) break;
+        // if (!withinBudget()) break;
         curr_restarts++;
     }
 
@@ -1841,10 +1863,7 @@ lbool Solver::solve_(bool do_simp, bool turn_off_simp) // Parameters are useless
     }else if (status == l_False && conflict.size() == 0)
         ok = false;
 
-
-
     cancelUntil(0);
-
 
     double finalTime = cpuTime();
     if(status==l_True) {
@@ -2072,18 +2091,27 @@ void Solver::prepareWatches(vec<Lit>& c){
 // NOTE: some clauses at level 0 have no unit clause as reason, so ugly code ahead
 void Solver::minimizeClause(vec<Lit>& cl){
     vec<int> minimizeTmpVec;
+    vec<Lit> copyCl;
+    copyCl.growTo(cl.size());
     minimizeTmpVec.growTo(cl.size());
     for(int i=0; i<cl.size(); ++i){
+        copyCl[i] = cl[i];
         int vcli = var(cl[i]);
         minimizeTmpVec[i]=vcli;
         assert(seen[vcli]==0);
         seen[vcli]=1; // mark as seen
     }
-    for(int i=0; i<cl.size() && cl.size()>1; ++i){
+
+    bool isSymmetry = false;
+    for(int i=0; i<cl.size() && cl.size()>1; ++i) {
         if(value(cl[i])!=l_False){
             continue;
         }
         if(level(var(cl[i]))==0){
+            if (forbid_units.find(var(cl[i])) != forbid_units.end()) {
+                isSymmetry = true;
+                break;
+            }
             cl.swapErase(i);
             --i;
         }else if(reason(var(cl[i]))!=CRef_Undef){
@@ -2096,7 +2124,11 @@ void Solver::minimizeClause(vec<Lit>& cl){
                     break;
                 }
             }
-            if(allSeen){
+            if(allSeen) {
+                if (ca[reason(var(cl[i]))].symmetry()) {
+                    isSymmetry = true;
+                    break;
+                }
                 cl.swapErase(i);
                 --i;
             }
@@ -2105,13 +2137,22 @@ void Solver::minimizeClause(vec<Lit>& cl){
     for(int i=0; i<minimizeTmpVec.size(); ++i){ // reset seen
         seen[minimizeTmpVec[i]]=0;
     }
+
+    if (isSymmetry) {
+        cl.clear();
+        cl.growTo(copyCl.size());
+        for (int i=0; i<copyCl.size() ; i++) {
+            cl[i] = copyCl[i];
+        }
+    }
 }
 
 // NOTE: sometimes backtracks to add unit clause instead of conflict clause
-CRef Solver::addClauseFromSymmetry(vec<Lit>& symmetrical){
+CRef Solver::addClauseFromSymmetry(const Clause &from, vec<Lit>& symmetrical){
     assert(symmetrical.size() > 0);
 
-    CRef cr = ca.alloc(symmetrical, true, false, false, false);
+    std::unique_ptr<std::set<SymGenerator*>> compatibility = from.symmetry() ? std::unique_ptr<std::set<SymGenerator*>>(new std::set<SymGenerator*>(from.scompat()->begin(), from.scompat()->end())) : nullptr;
+    CRef cr = ca.alloc(symmetrical, true, false, false, from.symmetry(), std::move(compatibility));
     ca[cr].setOneWatched(false);
 	  //ca[cr].setSizeWithoutSelectors(szWithoutSelectors); // TODO: Is this code needed? What does it do?
     learnts.push(cr);
@@ -2240,26 +2281,17 @@ void Solver::updateNotifySEL(Lit p) {
                 assert(ca[cr].scompat() != nullptr);
                 bool isNotCompatible = ca[cr].scompat()->find(g) == ca[cr].scompat()->end();
                 if (g->isStab() && isNotCompatible) {
-                    g->notifyReasonOfBreaked(p);
+                    g->updateNotify(p);
                 }
             }
         }
     }
-
-    bool isESBPUnit = forbid_units.find(var(p)) != forbid_units.end();
-    for (int i=0; i<generators.size(); i++) {
-        SymGenerator *g = generators[i];
-        if (g->permutes(p))
-            g->updateNotify(p, level(var(p)), isESBPUnit, assigns);
-    }
-
 }
 
 void Solver::updateCancelSEL(Lit p) {
     for (int i=0; i<generators.size(); i++) {
         SymGenerator *g = generators[i];
-        if (g->permutes(p))
-            g->updateCancel(p);
+        g->updateCancel(p);
     }
 }
 
@@ -2307,7 +2339,7 @@ CRef Solver::learntSymmetryClause(cosy::ClauseInjector::Type type, Lit p) {
             assert(ca[cr].symmetry());
             ca[cr].setLBD(computeLBD(ca[cr]));
             ca[cr].setOneWatched(false);
-            ca[cr].setSizeWithoutSelectors(0);  // I don't know how to put here !!!
+            // ca[cr].setSizeWithoutSelectors(0);  // I don't know how to put here !!!
             learnts.push(cr);
             attachClause(cr);
 
@@ -2315,4 +2347,14 @@ CRef Solver::learntSymmetryClause(cosy::ClauseInjector::Type type, Lit p) {
         }
     }
     return CRef_Undef;
+}
+
+void Solver::computeStabilizerLevelZero() {
+    assert(decisionLevel() == 0);
+    stabilizer.clear();
+    for (int i=0; i<generators.size(); i++) {
+        SymGenerator *g = generators[i];
+        if (g->stabilize(trail))
+            stabilizer.insert(g);
+    }
 }

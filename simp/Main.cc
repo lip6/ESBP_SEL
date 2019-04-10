@@ -231,8 +231,6 @@ int main(int argc, char** argv)
               std::move(adapter)));
         S.notifyCNFUnits();
 
-
-
         gzFile in_sym = (argc == 1) ? gzdopen(0, "rb") : gzopen(symloc.c_str(), "rb");
 
         if (in_sym!=NULL){

@@ -104,7 +104,10 @@ public:
     std::unique_ptr<cosy::SymmetryController<Lit>> symmetry;
     CRef learntSymmetryClause(cosy::ClauseInjector::Type type, Lit p);
     void notifyCNFUnits();
+    void computeStabilizerLevelZero();
+
     std::unordered_set<Var> forbid_units;
+    std::unordered_set<SymGenerator*> stabilizer;
 
     void updateNotifySEL(Lit p);
     void updateCancelSEL(Lit p);
@@ -445,7 +448,7 @@ private:
 
     void minimizeClause(vec<Lit>& c); // minimize clause through self-subsumption
     void prepareWatches(vec<Lit>& c); // prepares watches of a (new) clause
-    CRef addClauseFromSymmetry(vec<Lit>& symmetrical); // @pre: clause is unit or conflicting. Bool return value is true if the symmetrical clause is unit or conflicting. CRef return value is the conflicting clause, or CRef_Undef if the symmetrical clause is not conflicting.
+    CRef addClauseFromSymmetry(const Clause& from, vec<Lit>& symmetrical); // @pre: clause is unit or conflicting. Bool return value is true if the symmetrical clause is unit or conflicting. CRef return value is the conflicting clause, or CRef_Undef if the symmetrical clause is not conflicting.
 
     // returns 0: conflict clause: added to learned clause store
     // returns 1: unit clause:     added to learned clause store
