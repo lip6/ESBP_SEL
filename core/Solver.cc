@@ -1235,7 +1235,7 @@ NextClause:
 
             const Clause& c = ca[reason(selProp[currentclause])];
             SymGenerator *g = selGen[currentclause];
-            if (stabilizer.find(g) == stabilizer.end() || !g->isActive()))
+            if (stabilizer.find(g) == stabilizer.end() || !g->isActive())
                 continue;
 
             // create new learned clause
@@ -1306,7 +1306,7 @@ NextClause:
             assert(g->permutes(currentGenLit));
             const Clause& c = ca[reason_cgl];
 
-            if (stabilizer.find(g) == stabilizer.end() || !g->isActive()))
+            if (stabilizer.find(g) == stabilizer.end() || !g->isActive())
                 continue;
 
             int result = addSelClause(g, currentGenLit);

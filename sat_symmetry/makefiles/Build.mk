@@ -19,11 +19,14 @@ $(call REQUIRE-DEP, $(sources))
 $(call REQUIRE-DEP, $(tests))
 
 
+a:
+	echo $(objects)
+
 $(LIB)$(lib): $(objects)
 
 CFLAGS += -Iinclude/ -fPIC -Wall -Wextra
 
-default: CFLAGS += -O3 -DDEBUG
+default: CFLAGS += -O3 -DNDEBUG
 default: $(LIB)$(lib)
 
 ################################################################################
