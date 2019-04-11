@@ -78,6 +78,58 @@ static void parse_DIMACS_main(B& in, Solver& S) {
 }
 
 template<class B, class Solver>
+static void parse_SYMMETRY_BLISS(B& in, Solver& S) {
+	int nrVars=S.nVars();
+	assert(nrVars>0);
+	assert(*in=='[');
+	++in; // skipping the "["
+	++in; // jumping to next line
+	int start,first, second;
+	while(*in!=']'){
+		vec<Lit> symFrom, symTo;
+		while(*in=='('){
+			++in;
+			start = parseInt(in);
+			if(start>nrVars){ //adjusting shatter's format
+				start=nrVars-start;
+			}
+			second = start;
+			assert(*in==',');
+			while(*in==','){
+				++in;
+				first = second;
+				second = parseInt(in);
+				if(second>nrVars){ //adjusting shatter's format
+					second=nrVars-second;
+				}
+				if(second>= -nrVars && first>= -nrVars){ //check for phase shift symmetries
+					symFrom.push(mkLit(abs(first)-1,first<0));
+					symTo.push(mkLit(abs(second)-1,second<0));
+				}else{
+					assert(second< -nrVars && first< -nrVars);
+				}
+			}
+			assert(*in==')'); ++in;
+			first = second;
+			second = start;
+			if(second>=-nrVars && first>=-nrVars){ //check for phase shift symmetries
+				symFrom.push(mkLit(abs(first)-1,first<0));
+				symTo.push(mkLit(abs(second)-1,second<0));
+			}else{
+				assert(second< -nrVars && first< -nrVars);
+			}
+		}
+                S.addGenerator(new SymGenerator(symFrom,symTo));
+		if(*in==','){
+			++in; ++in; assert(*in=='(');
+		}else{
+			++in; assert(*in==']');
+		}
+	}
+        S.initiateGenWatches();
+}
+
+template<class B, class Solver>
 static void parse_SYMMETRY_main(B& in, Solver& S, bool linear_sym_gens) {
     vec<Lit> from;
     vec<Lit> to;
@@ -167,6 +219,14 @@ static void parse_DIMACS(gzFile input_stream, Solver& S) {
     parse_DIMACS_main(in, S); }
 
 template<class Solver>
+static void parse_SYMMETRY_BLISS(gzFile input_stream, Solver& S) {
+    StreamBuffer in(input_stream);
+    parse_SYMMETRY_BLISS(in, S);
+ }
+
+
+
+ template<class Solver>
 static void parse_SYMMETRY(gzFile input_stream, Solver& S, bool linear_sym_gens) {
     StreamBuffer in(input_stream);
     parse_SYMMETRY_main(in, S, linear_sym_gens); }

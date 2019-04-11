@@ -152,6 +152,9 @@ int main(int argc, char** argv)
 
          BoolOption   linear_sym_gens   ("MAIN", "linear-sym-gens", "Use a linear number of generators for row interchangeability.", false);
 
+         BoolOption    opt_bliss      ("SYM", "bliss",  "Parse sym file in bliss", false);
+         BoolOption    opt_breakid    ("SYM", "breakid","PArse sym file in breakid format", false);
+
         parseOptions(argc, argv, true);
 
         SimpSolver  S;
@@ -213,29 +216,46 @@ int main(int argc, char** argv)
         parse_DIMACS(in, S);
         gzclose(in);
 
+        if (opt_bliss && opt_breakid) {
+            std::cout << "Cannot Bliss and BreakID format" << std::endl;
+            return 1;
+        }
+
         std::unique_ptr<cosy::LiteralAdapter<Glucose::Lit>> adapter
             (new GlucoseLiteralAdapter());
 
         std::string cnf_file = std::string(argv[1]);
+        std::string sym_file_bliss = cnfloc + ".bliss";
         std::string symloc = cnfloc + ".sym";
 
-        // S.symmetry = std::unique_ptr<cosy::SymmetryController<Glucose::Lit>>
-        //     (new cosy::SymmetryController<Glucose::Lit>
-        //      (cnf_file,
-        //       cosy::SymmetryFinder::Automorphism::BLISS,
-        //       std::move(adapter)));
+        if (opt_bliss) {
+            S.symmetry = std::unique_ptr<cosy::SymmetryController<Glucose::Lit>>
+                (new cosy::SymmetryController<Glucose::Lit>
+                 (cnf_file,
+                  sym_file_bliss, cosy::SymmetryReader::SAUCY_SYM,
+                  std::move(adapter)));
+        } else if (opt_breakid) {
+            S.symmetry = std::unique_ptr<cosy::SymmetryController<Glucose::Lit>>
+                (new cosy::SymmetryController<Glucose::Lit>
+                 (cnf_file, symloc, cosy::SymmetryReader::BREAKID_SYM,
+                  std::move(adapter)));
+        } else {
+            S.symmetry = nullptr;
+        }
 
-        S.symmetry = std::unique_ptr<cosy::SymmetryController<Glucose::Lit>>
-            (new cosy::SymmetryController<Glucose::Lit>
-             (cnf_file, symloc, cosy::SymmetryReader::BREAKID_SYM,
-              std::move(adapter)));
         S.notifyCNFUnits();
 
-        gzFile in_sym = (argc == 1) ? gzdopen(0, "rb") : gzopen(symloc.c_str(), "rb");
+        gzFile in_sym = (argc == 1) ? gzdopen(0, "rb") : opt_breakid ? gzopen(symloc.c_str(), "rb") : gzopen(sym_file_bliss.c_str(), "rb");
 
         if (in_sym!=NULL){
-            parse_SYMMETRY(in_sym, S, linear_sym_gens);
-            gzclose(in_sym);
+            if (opt_breakid) {
+                parse_SYMMETRY(in_sym, S, linear_sym_gens);
+                gzclose(in_sym);
+            } else if (opt_bliss) {
+                parse_SYMMETRY_BLISS(in_sym, S);
+                gzclose(in_sym);
+            }
+
         }else{
             printf("c Did not find .sym symmetry file. Assuming no symmetry is provided.\n");
         }
