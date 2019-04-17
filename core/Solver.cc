@@ -888,6 +888,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt,vec<Lit>&selectors, int& o
         return;
 
     comp->clear();
+
     if (isSymmetry && !fsym) {
         for (CRef cr : conf_clauses) {
             std::set<SymGenerator*>* check = ca[cr].scompat();
@@ -940,9 +941,13 @@ bool Solver::litRedundant(Lit p, uint32_t abstract_levels) {
     int top = analyze_toclear.size();
     bool esbp = false;
 
-    while (analyze_stack.size() > 0) {
+    while (analyze_stack.size() > 0 && !esbp) {
         assert(reason(var(analyze_stack.last())) != CRef_Undef);
         Clause& c = ca[reason(var(analyze_stack.last()))];
+        if (c.symmetry()) {
+            esbp = true;
+            break;
+        }
         analyze_stack.pop(); //
         if (c.size() == 2 && value(c[0]) == l_False) {
             assert(value(c[1]) == l_True);
@@ -955,10 +960,6 @@ bool Solver::litRedundant(Lit p, uint32_t abstract_levels) {
             if (!seen[var(p)]) {
                 if (level(var(p)) > 0) {
                     if (reason(var(p)) != CRef_Undef && (abstractLevel(var(p)) & abstract_levels) != 0) {
-                        if (ca[reason(var(p))].symmetry()) {
-                            esbp = true;
-                            break;
-                        }
                         seen[var(p)] = 1;
                         analyze_stack.push(p);
                         analyze_toclear.push(p);
@@ -1235,7 +1236,7 @@ NextClause:
 
             const Clause& c = ca[reason(selProp[currentclause])];
             SymGenerator *g = selGen[currentclause];
-            if (stabilizer.find(g) == stabilizer.end() || !g->isActive())
+            if (c.symmetry() && (stabilizer.find(g) == stabilizer.end() || !g->isActive()))
                 continue;
 
             // create new learned clause
@@ -1306,7 +1307,7 @@ NextClause:
             assert(g->permutes(currentGenLit));
             const Clause& c = ca[reason_cgl];
 
-            if (stabilizer.find(g) == stabilizer.end() || !g->isActive())
+            if (c.symmetry() && (stabilizer.find(g) == stabilizer.end() || !g->isActive()))
                 continue;
 
             int result = addSelClause(g, currentGenLit);
