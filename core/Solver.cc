@@ -892,6 +892,10 @@ bool Solver::litRedundant(Lit p, uint32_t abstract_levels) {
     while (analyze_stack.size() > 0) {
         assert(reason(var(analyze_stack.last())) != CRef_Undef);
         Clause& c = ca[reason(var(analyze_stack.last()))];
+        if (c.symmetry()) {
+            esbp = true;
+            break;
+        }
         analyze_stack.pop(); //
         if (c.size() == 2 && value(c[0]) == l_False) {
             assert(value(c[1]) == l_True);
