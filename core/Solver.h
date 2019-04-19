@@ -51,6 +51,8 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 #define Glucose_Solver_h
 
 #include <unordered_set>
+#include <unordered_map>
+#include <set>
 
 #include "mtl/Heap.h"
 #include "mtl/Alg.h"
@@ -104,13 +106,9 @@ public:
     std::unique_ptr<cosy::SymmetryController<Lit>> symmetry;
     CRef learntSymmetryClause(cosy::ClauseInjector::Type type, Lit p);
     void notifyCNFUnits();
-    void computeStabilizerLevelZero();
+    void updateESBPUnitsSymmetries();
 
-    std::unordered_set<Var> forbid_units;
-    std::unordered_set<SymGenerator*> stabilizer;
-
-    void updateNotifySEL(Lit p);
-    void updateCancelSEL(Lit p);
+    std::unordered_map<Lit, std::set<SymGenerator*>> esbp_units;
 
     // Solving:
     //

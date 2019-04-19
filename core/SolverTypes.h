@@ -90,7 +90,6 @@ struct Lit {
     bool operator <  (Lit p) const { return x < p.x;  } // '<' makes p, ~p adjacent in the ordering.
 };
 
-
 inline  Lit  mkLit     (Var var, bool sign = false) { Lit p; p.x = var + var + (int)sign; return p; }
 inline  Lit  operator ~(Lit p)              { Lit q; q.x = p.x ^ 1; return q; }
 inline  Lit  operator ^(Lit p, bool b)      { Lit q; q.x = p.x ^ (unsigned int)b; return q; }
@@ -187,7 +186,7 @@ class Clause {
     // NOTE: This constructor cannot be used directly (doesn't allocate enough memory).
     template<class V>
     Clause(const V& ps, int _extra_size, bool learnt, bool fsymmetry, bool symmetry,
-           std::unique_ptr<std::set<SymGenerator*>> p) : perms(std::move(p)) {
+           std::unique_ptr<std::set<SymGenerator*>>&& p) : perms(std::move(p)) {
 	assert(_extra_size < (1<<2));
         header.mark      = 0;
         header.learnt    = learnt;
@@ -301,7 +300,7 @@ class ClauseAllocator : public RegionAllocator<uint32_t>
 
     template<class Lits>
     CRef alloc(const Lits& ps, bool learnt = false, bool imported = false, bool fsymmetry = false,
-	       bool symmetry = false, std::unique_ptr<std::set<SymGenerator*>> perms = nullptr)
+	       bool symmetry = false, std::unique_ptr<std::set<SymGenerator*>>&& perms = nullptr)
     {
         assert(sizeof(Lit)      == sizeof(uint32_t));
         assert(sizeof(float)    == sizeof(uint32_t));
@@ -324,7 +323,6 @@ class ClauseAllocator : public RegionAllocator<uint32_t>
     void free(CRef cid)
     {
         Clause& c = operator[](cid);
-        c.perms = nullptr;
         RegionAllocator<uint32_t>::free(clauseWord32Size(c.size(), c.has_extra()));
     }
 
@@ -334,10 +332,11 @@ class ClauseAllocator : public RegionAllocator<uint32_t>
 
         if (c.reloced()) { cr = c.relocation(); return; }
 
+        if (c.symmetry())
+            assert(c.scompat() != nullptr);
 
-        //std::unique_ptr<std::set<SymGenerator*>> compatibility = c.symmetry() ? std::unique_ptr<std::set<SymGenerator*>>(new std::set<SymGenerator*>(c.scompat()->begin(), c.scompat()->end())) : nullptr;
-
-        cr = to.alloc(c, c.learnt(), c.wasImported(), c.fsymmetry(), c.symmetry(), std::move(c.perms));
+        std::unique_ptr<std::set<SymGenerator*>> compatibility = c.symmetry() ? std::make_unique<std::set<SymGenerator*>>(c.scompat()->begin(), c.scompat()->end()) : nullptr;
+        cr = to.alloc(c, c.learnt(), c.wasImported(), c.fsymmetry(), c.symmetry(), std::move(compatibility));
         c.relocate(cr);
 
 
@@ -527,7 +526,6 @@ struct SymGenerator { // TODO: make the memory footprint smaller by not storing 
 private:
     int offset;
     vec<Lit> image; // image[v-offset] is the image of mkLit(v) under this generator
-    Lit reasonOfBreaked;
 
     void addImage(Lit from, Lit to){
         assert(var(from)-offset >= 0);
@@ -536,7 +534,7 @@ private:
     }
 
 public:
-    SymGenerator(vec<Lit>& from, vec<Lit>& to) : reasonOfBreaked(lit_Undef) {
+    SymGenerator(vec<Lit>& from, vec<Lit>& to) {
         assert(from.size()==to.size());
         offset = INT_MAX;
         int maxVar = INT_MIN;
@@ -566,32 +564,7 @@ public:
     }
 
 
-    /* ESBP Compatibility */
-    void updateNotify(Lit l) {
-        notifyReasonOfBreaked(l);
-    }
-
-    void updateCancel(Lit l) {
-        cancelReasonOfBreaked(l);
-    }
-
-    void notifyReasonOfBreaked(Lit l) {
-        if(!isStab()) return;
-        reasonOfBreaked = l;
-    }
-
-    void cancelReasonOfBreaked(Lit p) {
-        if (reasonOfBreaked != lit_Undef && reasonOfBreaked == p)
-            reasonOfBreaked = lit_Undef;
-    }
-
-
-    bool isActive() const { return isStab(); }
-
-    bool isStab() const { return reasonOfBreaked == lit_Undef; }
-
-
-    bool stabilize(const vec<Lit>& clause) {
+    bool stabilize(const vec<Lit>& clause) const {
         for (int i=0; i<clause.size(); i++) {
             if (!permutes(clause[i]))
                 continue;
@@ -606,7 +579,6 @@ public:
         }
         return true;
     }
-    /* ESBP Compatibility end */
 
     void print(){
         for(int i=0; i<image.size(); ++i){
@@ -618,7 +590,7 @@ public:
         printf("\n");
     }
 
-    inline Lit getImage(Lit l){
+    inline Lit getImage(Lit l) const {
         int index = var(l)-offset;
         if(index<0 || index>=image.size()){
             return l;
@@ -626,7 +598,7 @@ public:
         return image[index]^sign(l);
     }
 
-    inline bool permutes(Lit l){
+    inline bool permutes(Lit l) const {
         int index = var(l)-offset;
         return (index>=0 && index<image.size() && (image[index]^sign(l))!=l);
     }
@@ -641,6 +613,16 @@ public:
 };
 
 }
+
+namespace std {
+template <>
+struct hash<Glucose::Lit> {
+    size_t operator()(const Glucose::Lit& literal) const {
+        return literal.x;
+    }
+};
+} // namespace std
+
 
 
 #endif
