@@ -332,11 +332,11 @@ class ClauseAllocator : public RegionAllocator<uint32_t>
 
         if (c.reloced()) { cr = c.relocation(); return; }
 
-        if (c.symmetry())
-            assert(c.scompat() != nullptr);
+        /* if (c.symmetry()) */
+        /*     assert(c.scompat() != nullptr); */
 
-        std::unique_ptr<std::set<SymGenerator*>> compatibility = c.symmetry() ? std::make_unique<std::set<SymGenerator*>>(c.scompat()->begin(), c.scompat()->end()) : nullptr;
-        cr = to.alloc(c, c.learnt(), c.wasImported(), c.fsymmetry(), c.symmetry(), std::move(compatibility));
+        /* std::unique_ptr<std::set<SymGenerator*>> compatibility = c.symmetry() ? std::make_unique<std::set<SymGenerator*>>(c.scompat()->begin(), c.scompat()->end()) : nullptr; */
+        cr = to.alloc(c, c.learnt(), c.wasImported(), c.fsymmetry(), c.symmetry(), std::move(c.perms));
         c.relocate(cr);
 
 

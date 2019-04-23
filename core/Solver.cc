@@ -2307,8 +2307,7 @@ CRef Solver::learntSymmetryClause(cosy::ClauseInjector::Type type, Lit p) {
                 if (g->stabilize(sbp))
                     comp.insert(g);
             }
-            std::unique_ptr<std::set<SymGenerator*>> compatibility = std::make_unique<std::set<SymGenerator*>>(comp.begin(), comp.end());
-            CRef cr = ca.alloc(sbp, true, false, true, true, std::move(compatibility));
+            CRef cr = ca.alloc(sbp, true, false, true, true, std::make_unique<std::set<SymGenerator*>>(comp.begin(), comp.end()));
 
             assert(compatibility == nullptr);
             assert(ca[cr].fsymmetry());
