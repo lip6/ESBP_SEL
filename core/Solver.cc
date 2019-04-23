@@ -889,7 +889,7 @@ bool Solver::litRedundant(Lit p, uint32_t abstract_levels) {
     bool esbp = false;
 
     int top = analyze_toclear.size();
-    while (analyze_stack.size() > 0) {
+    while (analyze_stack.size() > 0 && !esbp) {
         assert(reason(var(analyze_stack.last())) != CRef_Undef);
         Clause& c = ca[reason(var(analyze_stack.last()))];
         if (c.symmetry()) {
@@ -908,10 +908,6 @@ bool Solver::litRedundant(Lit p, uint32_t abstract_levels) {
             if (!seen[var(p)]) {
                 if (level(var(p)) > 0) {
                     if (reason(var(p)) != CRef_Undef && (abstractLevel(var(p)) & abstract_levels) != 0) {
-                        if (ca[reason(var(p))].symmetry()) {
-                            esbp = true;
-                            break;
-                        }
                         seen[var(p)] = 1;
                         analyze_stack.push(p);
                         analyze_toclear.push(p);
@@ -2060,6 +2056,10 @@ void Solver::minimizeClause(vec<Lit>& cl){
             --i;
         }else if(reason(var(cl[i]))!=CRef_Undef){
             const Clause& expl = ca[reason(var(cl[i]))];
+            if (expl.symmetry()) {
+                isSymmetry = true;
+                break;
+            }
             bool allSeen = true;
             for(int j=0; j<expl.size(); ++j){
                 int var_j = var(expl[j]);
@@ -2069,10 +2069,6 @@ void Solver::minimizeClause(vec<Lit>& cl){
                 }
             }
             if(allSeen) {
-                if (ca[reason(var(cl[i]))].symmetry()) {
-                    isSymmetry = true;
-                    break;
-                }
                 cl.swapErase(i);
                 --i;
             }

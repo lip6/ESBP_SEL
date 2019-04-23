@@ -6,13 +6,17 @@ shift
 MODE="$1"
 shift
 
+SOLVER="gdb --args $(dirname $0)/glucose"
+SOLVER="valgrind --leak-check=full $(dirname $0)/glucose"
+
+SOLVER="$(dirname $0)/glucose"
 
 if [ "$MODE" = "breakid" ]; then
     cat "$CNF" | $(dirname $0)/BreakID -no-row -no-bin -no-small -no-relaxed -s -1 -store-sym "$CNF.sym" > /dev/null
-    $(dirname $0)/glucose_release -model -breakid "$CNF" $@
+    $SOLVER -model -breakid "$CNF" $@
 elif [ "$MODE" = "bliss" ]; then
     $(dirname $0)/CNFBlissSymmetries "$CNF" > "$CNF.bliss"
-    $(dirname $0)/glucose_release -model -bliss "$CNF" $@
+    $SOLVER -model -bliss "$CNF" $@
 else
     echo "ERROR";
 fi
