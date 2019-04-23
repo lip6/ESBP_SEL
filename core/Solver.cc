@@ -1042,7 +1042,6 @@ void Solver::uncheckedEnqueue(Lit p, CRef from) {
     vardata[var(p)] = mkVarData(from, decisionLevel());
     trail.push_(p);
 
-
     if (decisionLevel() == 0 && from != CRef_Undef) {
         const Clause& c = ca[from];
 
@@ -2099,6 +2098,8 @@ void Solver::prepareWatches(vec<Lit>& c){
 // NOTE: some clauses at level 0 have no unit clause as reason, so ugly code ahead
 void Solver::minimizeClause(vec<Lit>& cl){
     for(int i=0; i<cl.size(); ++i) {
+        if (value(cl[i]) == l_Undef)
+            continue;
         if ((level(var(cl[i])) == 0 && esbp_units.find(cl[i]) != esbp_units.end()) ||
             reason(var(cl[i])) != CRef_Undef && ca[reason(var(cl[i]))].symmetry()) {
             return;
