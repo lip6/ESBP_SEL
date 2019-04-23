@@ -2309,8 +2309,6 @@ CRef Solver::learntSymmetryClause(cosy::ClauseInjector::Type type, Lit p) {
             }
             CRef cr = ca.alloc(sbp, true, false, true, true);
             ca[cr].perms = std::make_shared<std::set<SymGenerator*>>(comp.begin(), comp.end());
-            if (ca[cr].perms.use_count() != 1)
-                exit(-2);
             assert(ca[cr].fsymmetry());
             assert(ca[cr].symmetry());
             assert(comp.size() == ca[cr].compatiblePerms()->size());
