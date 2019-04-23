@@ -1241,7 +1241,7 @@ NextClause:
             const Clause& c = ca[reason(selProp[currentclause])];
             SymGenerator *g = selGen[currentclause];
 
-            if (c.symmetry() && c.scompat()->find(g) == c.scompat()->end())
+            if (c.symmetry() && c.compatiblePerms()->find(g) == c.compatiblePerms()->end())
                 continue;
 
             // create new learned clause
@@ -1313,7 +1313,7 @@ NextClause:
             assert(g->permutes(currentGenLit));
             const Clause& c = ca[reason_cgl];
 
-            // if (c.symmetry() && c.scompat()->find(g) == c.scompat()->end())
+            // if (c.symmetry() && c.compatiblePerms()->find(g) == c.compatiblePerms()->end())
             //     continue;
 
             int result = addSelClause(g, currentGenLit);
@@ -1648,8 +1648,8 @@ lbool Solver::search(int nof_conflicts) {
                 nbUn++;
                 parallelExportUnaryClause(learnt_clause[0]);
             } else {
-                std::unique_ptr<std::set<SymGenerator*>> compatibility = isSymmetry ? std::make_unique<std::set<SymGenerator*>>(comp.begin(), comp.end()) : nullptr;
-                CRef cr = ca.alloc(learnt_clause, true, false, false, isSymmetry, std::move(compatibility));
+                CRef cr = ca.alloc(learnt_clause, true, false, false, isSymmetry);
+                ca[cr].perms = isSymmetry ? std::make_shared<std::set<SymGenerator*>>(comp.begin(), comp.end()) : nullptr;
                 assert(ca[cr].symmetry() == isSymmetry);
                 ca[cr].setLBD(nblevels);
                 ca[cr].setOneWatched(false);
@@ -2148,8 +2148,8 @@ CRef Solver::addClauseFromSymmetry(const Clause &from, vec<Lit>& symmetrical){
     assert(decisionLevel() > 0);
     assert(symmetrical.size() > 1);
 
-    std::unique_ptr<std::set<SymGenerator*>> compatibility = from.symmetry() ? std::make_unique<std::set<SymGenerator*>>(from.scompat()->begin(), from.scompat()->end()) : nullptr;
-    CRef cr = ca.alloc(symmetrical, true, false, false, from.symmetry(), std::move(compatibility));
+    CRef cr = ca.alloc(symmetrical, true, false, false, from.symmetry());
+    ca[cr].compatiblePerms() = from.compatiblePerms();
     ca[cr].setOneWatched(false);
 	  //ca[cr].setSizeWithoutSelectors(szWithoutSelectors); // TODO: Is this code needed? What does it do?
     learnts.push(cr);
@@ -2174,7 +2174,7 @@ int Solver::addSelClause(SymGenerator* g, Lit l){
     CRef reason_l = reason(var(l));
     assert(reason_l != CRef_Undef);
 
-    if (ca[reason_l].symmetry() && ca[reason_l].scompat()->find(g) == ca[reason_l].scompat()->end())
+    if (ca[reason_l].symmetry() && ca[reason_l].compatiblePerms()->find(g) == ca[reason_l].compatiblePerms()->end())
         return 2;
 
     const Clause& c_l = ca[reason_l];
@@ -2307,12 +2307,13 @@ CRef Solver::learntSymmetryClause(cosy::ClauseInjector::Type type, Lit p) {
                 if (g->stabilize(sbp))
                     comp.insert(g);
             }
-            CRef cr = ca.alloc(sbp, true, false, true, true, std::make_unique<std::set<SymGenerator*>>(comp.begin(), comp.end()));
-
-            assert(compatibility == nullptr);
+            CRef cr = ca.alloc(sbp, true, false, true, true);
+            ca[cr].perms = std::make_shared<std::set<SymGenerator*>>(comp.begin(), comp.end());
+            if (ca[cr].perms.use_count() != 1)
+                exit(-2);
             assert(ca[cr].fsymmetry());
             assert(ca[cr].symmetry());
-            assert(comp.size() == ca[cr].scompat()->size());
+            assert(comp.size() == ca[cr].compatiblePerms()->size());
             assert(ca[cr].symmetry());
             ca[cr].setLBD(computeLBD(ca[cr]));
             ca[cr].setOneWatched(false);

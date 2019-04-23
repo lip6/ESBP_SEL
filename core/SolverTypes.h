@@ -53,6 +53,7 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 
 #include <memory>
 #include <set>
+#include <iostream>
 
 #include <assert.h>
 #include <stdint.h>
@@ -161,8 +162,9 @@ typedef RegionAllocator<uint32_t>::Ref CRef;
 #define BITS_SIZEWITHOUTSEL 18
 #define BITS_REALSIZE 20
 class Clause {
-    std::unique_ptr< std::set<SymGenerator*> > perms;
-
+ public:
+    std::shared_ptr< std::set<SymGenerator*> > perms;
+ private:
     struct {
       unsigned mark       : 2;
       unsigned learnt     : 1;
@@ -185,8 +187,8 @@ class Clause {
 
     // NOTE: This constructor cannot be used directly (doesn't allocate enough memory).
     template<class V>
-    Clause(const V& ps, int _extra_size, bool learnt, bool fsymmetry, bool symmetry,
-           std::unique_ptr<std::set<SymGenerator*>>&& p) : perms(std::move(p)) {
+    Clause(const V& ps, int _extra_size, bool learnt, bool fsymmetry, bool symmetry) {
+        perms = nullptr;
 	assert(_extra_size < (1<<2));
         header.mark      = 0;
         header.learnt    = learnt;
@@ -236,6 +238,10 @@ public:
     bool         symmetry    ()      const   { return header.symmetry; }
     bool         fsymmetry   ()      const   { return header.fsymmetry; }
     std::set<SymGenerator*>* scompat()   const   { return perms.get(); }
+
+    const std::shared_ptr<std::set<SymGenerator*>>& compatiblePerms() const { return perms; }
+    std::shared_ptr<std::set<SymGenerator*>>& compatiblePerms() { return perms; }
+
     bool         has_extra   ()      const   { return header.extra_size > 0; }
     uint32_t     mark        ()      const   { return header.mark; }
     void         mark        (uint32_t m)    { header.mark = m; }
@@ -299,8 +305,7 @@ class ClauseAllocator : public RegionAllocator<uint32_t>
         RegionAllocator<uint32_t>::moveTo(to); }
 
     template<class Lits>
-    CRef alloc(const Lits& ps, bool learnt = false, bool imported = false, bool fsymmetry = false,
-	       bool symmetry = false, std::unique_ptr<std::set<SymGenerator*>>&& perms = nullptr)
+    CRef alloc(const Lits& ps, bool learnt = false, bool imported = false, bool fsymmetry = false,  bool symmetry = false)
     {
         assert(sizeof(Lit)      == sizeof(uint32_t));
         assert(sizeof(float)    == sizeof(uint32_t));
@@ -308,7 +313,7 @@ class ClauseAllocator : public RegionAllocator<uint32_t>
         bool use_extra = learnt | extra_clause_field;
         int extra_size = imported?3:(use_extra?1:0);
         CRef cid = RegionAllocator<uint32_t>::alloc(clauseWord32Size(ps.size(), extra_size));
-        new (lea(cid)) Clause(ps, extra_size, learnt, fsymmetry, symmetry, std::move(perms));
+        new (lea(cid)) Clause(ps, extra_size, learnt, fsymmetry, symmetry);
 
         return cid;
     }
@@ -323,6 +328,7 @@ class ClauseAllocator : public RegionAllocator<uint32_t>
     void free(CRef cid)
     {
         Clause& c = operator[](cid);
+        c.perms = nullptr;
         RegionAllocator<uint32_t>::free(clauseWord32Size(c.size(), c.has_extra()));
     }
 
@@ -332,17 +338,15 @@ class ClauseAllocator : public RegionAllocator<uint32_t>
 
         if (c.reloced()) { cr = c.relocation(); return; }
 
-        /* if (c.symmetry()) */
-        /*     assert(c.scompat() != nullptr); */
-
-        /* std::unique_ptr<std::set<SymGenerator*>> compatibility = c.symmetry() ? std::make_unique<std::set<SymGenerator*>>(c.scompat()->begin(), c.scompat()->end()) : nullptr; */
-        cr = to.alloc(c, c.learnt(), c.wasImported(), c.fsymmetry(), c.symmetry(), std::move(c.perms));
+        cr = to.alloc(c, c.learnt(), c.wasImported(), c.fsymmetry(), c.symmetry());
         c.relocate(cr);
 
 
         // Copy extra data-fields:
         // (This could be cleaned-up. Generalize Clause-constructor to be applicable here instead?)
         to[cr].mark(c.mark());
+        to[cr].compatiblePerms() = std::move(c.compatiblePerms());
+
         if (to[cr].learnt())        {
 	  to[cr].activity() = c.activity();
 	  to[cr].setLBD(c.lbd());
