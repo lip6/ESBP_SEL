@@ -2056,19 +2056,25 @@ void Solver::minimizeClause(vec<Lit>& cl){
             --i;
         }else if(reason(var(cl[i]))!=CRef_Undef){
             const Clause& expl = ca[reason(var(cl[i]))];
-            if (expl.symmetry()) {
-                isSymmetry = true;
-                break;
-            }
             bool allSeen = true;
             for(int j=0; j<expl.size(); ++j){
                 int var_j = var(expl[j]);
+                if (forbid_units.find(var_j) != forbid_units.end()) {
+                    isSymmetry = true;
+                    break;
+                }
+
                 if(level(var_j)!=0 && !seen[var_j]){
                     allSeen = false;
                     break;
                 }
             }
             if(allSeen) {
+                if (expl.symmetry()) {
+                    isSymmetry = true;
+                    break;
+                }
+
                 cl.swapErase(i);
                 --i;
             }
