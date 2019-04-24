@@ -1191,7 +1191,7 @@ NextClause:
     }
 
     vec<Lit> symmetrical;
-#if 0
+#if 1
 /*** first check existing symmetrical clauses ***/
     for(; confl == CRef_Undef && qhead_sel<trail.size(); ++qhead_sel){
         Lit prop = trail[qhead_sel];
@@ -1290,7 +1290,7 @@ NextClause:
         int watchEnd = genWatchIndices[var(currentGenLit)+1];
 
         if(level(var(currentGenLit))==0){ // NOTE: special purpose level 0 method needed as not all level 0 propagations have a reason clause attached to it
-            continue;  // debug
+
             assert(decisionLevel()==0);
             // OK
             if (esbp_units.find(currentGenLit) != esbp_units.end()) {
@@ -1326,7 +1326,7 @@ NextClause:
             int result = addSelClause(g, currentGenLit);
             if(result < 2){ // either conflict or unit clause
                 g->getSymmetricalClause(ca[reason_cgl], symmetrical);
-                minimizeClause(symmetrical);
+		 minimizeClause(symmetrical);
 
                 if(symmetrical.size()<2){
                     assert(symmetrical.size()==1);
@@ -1588,6 +1588,9 @@ lbool Solver::search(int nof_conflicts) {
     bool isSymmetry;
     starts++;
     for (;;) {
+
+      // std::cout << "Taille :" <<esbp_units.size()<< std::endl;
+
         if (decisionLevel() == 0) { // We import clauses FIXME: ensure that we will import clauses enventually (restart after some point)
             parallelImportUnaryClauses();
 
@@ -2105,7 +2108,6 @@ void Solver::prepareWatches(vec<Lit>& c){
 // minimize clause through self-subsumption
 // NOTE: some clauses at level 0 have no unit clause as reason, so ugly code ahead
 void Solver::minimizeClause(vec<Lit>& cl){
-    return;
     // for(int i=0; i<cl.size(); ++i) {
     //     if (value(cl[i]) == l_Undef)
     //         continue;
@@ -2144,20 +2146,28 @@ void Solver::minimizeClause(vec<Lit>& cl){
             --i;
         }else if(reason(var(cl[i]))!=CRef_Undef){
             const Clause& expl = ca[reason(var(cl[i]))];
-            if (expl.symmetry()) {
-                isSymmetry = true;
-                break;
-            }
+
             bool allSeen = true;
             for(int j=0; j<expl.size(); ++j){
                 int var_j = var(expl[j]);
+
+
+                if (esbp_units.find(~expl[j]) != esbp_units.end()) {
+                    isSymmetry = true;
+                    break;
+                }
+
                 if(level(var_j)!=0 && !seen[var_j]){
                     allSeen = false;
                     break;
                 }
             }
             if(allSeen){
-                cl.swapErase(i);
+	      if (expl.symmetry()) {
+                isSymmetry = true;
+                break;
+	      }
+	      cl.swapErase(i);
                 --i;
             }
         }
@@ -2182,7 +2192,7 @@ CRef Solver::addClauseFromSymmetry(const Clause &from, vec<Lit>& symmetrical){
     assert(symmetrical.size() > 1);
 
 
-    const std::shared_ptr<std::set<SymGenerator*>>& s = from.compatiblePerms();
+    const std::shared_ptr<std::set<SymGenerator*>> s = from.compatiblePerms();
     CRef cr = ca.alloc(symmetrical, true, false, false, from.symmetry());
     ca[cr].compatiblePerms() = s;
 
@@ -2363,6 +2373,7 @@ CRef Solver::learntSymmetryClause(cosy::ClauseInjector::Type type, Lit p) {
 
 
 void Solver::updateESBPUnitsSymmetries() {
+    return;
     assert(decisionLevel() == 0);
     for (auto& pair : esbp_units) {
         const Lit l = pair.first;
@@ -2373,11 +2384,18 @@ void Solver::updateESBPUnitsSymmetries() {
                 esbp_units[l].insert(g);
                 continue;
             }
-
-            assert(value(l) != l_Undef);
-            const Lit image = g->getImage(l);
-            if (value(l) == value(image))
-                esbp_units[l].insert(g);
         }
+        //     assert(value(l) != l_Undef);
+        //     // const Lit image = g->getImage(l);
+        //     // if (value(l) == value(image))
+        //     //     esbp_units[l].insert(g);
+        // }
+
+
+	// for (int i=0; i<generators.size(); i++) {
+	//     SymGenerator *g = generators[i];
+	//     if(g->stabilize(trail))
+	//        esbp_units[l].insert(g);
+	// }
     }
 }
