@@ -2148,8 +2148,11 @@ CRef Solver::addClauseFromSymmetry(const Clause &from, vec<Lit>& symmetrical){
     assert(decisionLevel() > 0);
     assert(symmetrical.size() > 1);
 
+
+    std::shared_ptr<SymGenerator*>& s = from.compatiblePerms();
     CRef cr = ca.alloc(symmetrical, true, false, false, from.symmetry());
-    ca[cr].compatiblePerms() = from.compatiblePerms();
+    ca[cr].compatiblePerms() = s;
+
     ca[cr].setOneWatched(false);
 	  //ca[cr].setSizeWithoutSelectors(szWithoutSelectors); // TODO: Is this code needed? What does it do?
     learnts.push(cr);
