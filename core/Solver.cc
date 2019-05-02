@@ -572,7 +572,7 @@ inline unsigned int Solver::computeLBD(const Clause &c) {
  * Minimisation with binary reolution
  ******************************************************************/
 void Solver::minimisationWithBinaryResolution(vec<Lit> &out_learnt) {
-
+    return;
     // Find the LBD measure
     unsigned int lbd = computeLBD(out_learnt);
     Lit p = ~out_learnt[0];
@@ -838,9 +838,9 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt,vec<Lit>&selectors, int& o
       Otherwise, this can be useless
      */
 
-    // if (!incremental && out_learnt.size() <= lbSizeMinimizingClause) {
-    //     minimisationWithBinaryResolution(out_learnt);
-    // }
+    if (!incremental && out_learnt.size() <= lbSizeMinimizingClause) {
+        minimisationWithBinaryResolution(out_learnt);
+    }
 
     // Find correct backtrack level:
     //
@@ -1044,14 +1044,17 @@ void Solver::uncheckedEnqueue(Lit p, CRef from) {
     vardata[var(p)] = mkVarData(from, decisionLevel());
     trail.push_(p);
 
-    // OK
     if (decisionLevel() == 0 && from != CRef_Undef) {
         const Clause& c = ca[from];
-        for (int i=0; i<c.size(); i++) {
-            if (esbp_units.find(~c[i]) != esbp_units.end()) {
-                assert(esbp_units.find(c[i]) == esbp_units.end());
-                esbp_units[p] = std::set<SymGenerator*>();
-                break;
+        if (c.symmetry()) {
+            esbp_units[p] = std::set<SymGenerator*>();
+        } else {
+            for (int i=0; i<c.size(); i++) {
+                if (esbp_units.find(~c[i]) != esbp_units.end()) {
+                    assert(esbp_units.find(c[i]) == esbp_units.end());
+                    esbp_units[p] = std::set<SymGenerator*>();
+                    break;
+                }
             }
         }
     }
@@ -1191,7 +1194,6 @@ NextClause:
     }
 
     vec<Lit> symmetrical;
-#if 1
 /*** first check existing symmetrical clauses ***/
     for(; confl == CRef_Undef && qhead_sel<trail.size(); ++qhead_sel){
         Lit prop = trail[qhead_sel];
@@ -1253,7 +1255,6 @@ NextClause:
 
             minimizeClause(symmetrical);
             if(symmetrical.size() < 2){                assert(symmetrical.size()==1);
-                continue;
                 cancelUntil(0);
                 if(value(symmetrical[0])==l_Undef){ // unit clause
                     ++symselprops;
@@ -1279,7 +1280,6 @@ NextClause:
             }
         }
     }
-#endif
 
 /*** check for new symmetrical clauses ***/
     for(; confl == CRef_Undef && qhead_gen<trail.size(); ++qhead_gen, watchidx=0){ // do generator symmetry propagation
@@ -1330,8 +1330,6 @@ NextClause:
 
                 if(symmetrical.size()<2){
                     assert(symmetrical.size()==1);
-                    std::cout << "FGHJKJHG" << std::endl;
-                    getchar();
                     cancelUntil(0);
                     if(value(symmetrical[0])==l_Undef){ // unit clause
                         ++symgenprops;
@@ -2108,15 +2106,6 @@ void Solver::prepareWatches(vec<Lit>& c){
 // minimize clause through self-subsumption
 // NOTE: some clauses at level 0 have no unit clause as reason, so ugly code ahead
 void Solver::minimizeClause(vec<Lit>& cl){
-    // for(int i=0; i<cl.size(); ++i) {
-    //     if (value(cl[i]) == l_Undef)
-    //         continue;
-    //     if ((level(var(cl[i])) == 0 && esbp_units.find(~cl[i]) != esbp_units.end()) ||
-
-    //         reason(var(cl[i])) != CRef_Undef && ca[reason(var(cl[i]))].symmetry()) {
-    //         return;
-    //     }
-    // }
     vec<int> minimizeTmpVec;
     vec<Lit> copyCl;
     copyCl.growTo(cl.size());
@@ -2151,7 +2140,6 @@ void Solver::minimizeClause(vec<Lit>& cl){
             for(int j=0; j<expl.size(); ++j){
                 int var_j = var(expl[j]);
 
-
                 if (esbp_units.find(~expl[j]) != esbp_units.end()) {
                     isSymmetry = true;
                     break;
@@ -2163,10 +2151,10 @@ void Solver::minimizeClause(vec<Lit>& cl){
                 }
             }
             if(allSeen){
-	      if (expl.symmetry()) {
-                isSymmetry = true;
-                break;
-	      }
+                if (expl.symmetry()) {
+                    isSymmetry = true;
+                    break;
+                }
 	      cl.swapErase(i);
                 --i;
             }
@@ -2331,20 +2319,9 @@ CRef Solver::learntSymmetryClause(cosy::ClauseInjector::Type type, Lit p) {
 
             // Dirty make a copy of vector
             vec<Lit> sbp;
-            int max_i = 0;
-            int lvl = level(var(vsbp[max_i]));
 
-            int i = 0;
-            for (Lit l : vsbp) {
+            for (Lit l : vsbp)
                 sbp.push(l);
-                if (i > 1 && level(var(l)) > lvl) {
-                    max_i = i;
-                    lvl = level(var(vsbp[max_i]));
-                }
-                i++;
-            }
-            if (max_i != 0)
-                std::swap(sbp[0], sbp[max_i]);
 
             std::set<SymGenerator*> comp;
             for (int i=0; i<generators.size(); i++) {
@@ -2373,7 +2350,6 @@ CRef Solver::learntSymmetryClause(cosy::ClauseInjector::Type type, Lit p) {
 
 
 void Solver::updateESBPUnitsSymmetries() {
-    return;
     assert(decisionLevel() == 0);
     for (auto& pair : esbp_units) {
         const Lit l = pair.first;
@@ -2384,18 +2360,11 @@ void Solver::updateESBPUnitsSymmetries() {
                 esbp_units[l].insert(g);
                 continue;
             }
+
+            assert(value(l) != l_Undef);
+            const Lit image = g->getImage(l);
+            if (value(l) == value(image))
+                esbp_units[l].insert(g);
         }
-        //     assert(value(l) != l_Undef);
-        //     // const Lit image = g->getImage(l);
-        //     // if (value(l) == value(image))
-        //     //     esbp_units[l].insert(g);
-        // }
-
-
-	// for (int i=0; i<generators.size(); i++) {
-	//     SymGenerator *g = generators[i];
-	//     if(g->stabilize(trail))
-	//        esbp_units[l].insert(g);
-	// }
     }
 }
