@@ -7,9 +7,10 @@ MODE="$1"
 shift
 
 # SOLVER="gdb --args $(dirname $0)/glucose"
-# SOLVER="valgrind --leak-check=full  --show-leak-kinds=all --track-origins=yes --leak-resolution=high $(dirname $0)/glucose_release"
+# SOLVER="valgrind --leak-check=full $(dirname $0)/glucose"
 
-SOLVER="$(dirname $0)/glucose_release"
+SOLVER="$(dirname $0)/glucose"
+#SOLVER="$(dirname $0)/glucose_release"
 
 if [ "$MODE" = "breakid" ]; then
     cat "$CNF" | $(dirname $0)/BreakID -no-row -no-bin -no-small -no-relaxed -s -1 -store-sym "$CNF.sym" > /dev/null

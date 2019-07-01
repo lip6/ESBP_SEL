@@ -19,9 +19,6 @@ $(call REQUIRE-DEP, $(sources))
 $(call REQUIRE-DEP, $(tests))
 
 
-a:
-	echo $(objects)
-
 $(LIB)$(lib): $(objects)
 
 CFLAGS += -Iinclude/ -fPIC -Wall -Wextra

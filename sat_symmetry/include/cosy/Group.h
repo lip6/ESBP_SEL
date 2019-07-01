@@ -36,24 +36,24 @@ class Group {
     std::vector< std::unique_ptr<Permutation> > _permutations;
     std::unordered_set<BooleanVariable> _symmetric;
     std::unordered_set<BooleanVariable> _inverting;
-    std::vector< std::unordered_set<int> > _watchers;
+    std::vector< std::vector<int> > _watchers;
 
     bool isPermutationSpurious(const std::unique_ptr<Permutation>& p) const;
 };
 
 struct Group::Iterator {
     typedef int value_type;
-    typedef std::unordered_set<int>::const_iterator const_iterator;
+    typedef std::vector<int>::const_iterator const_iterator;
 
     Iterator() {}
-    Iterator(const std::unordered_set<int>::const_iterator& b,
-             const std::unordered_set<int>::const_iterator& e) :
+    Iterator(const std::vector<int>::const_iterator& b,
+             const std::vector<int>::const_iterator& e) :
         _begin(b), _end(e) {}
 
-    std::unordered_set<int>::const_iterator begin() const { return _begin; }
-    std::unordered_set<int>::const_iterator end() const { return _end; }
-    const std::unordered_set<int>::const_iterator _begin;
-    const std::unordered_set<int>::const_iterator _end;
+    std::vector<int>::const_iterator begin() const { return _begin; }
+    std::vector<int>::const_iterator end() const { return _end; }
+    const std::vector<int>::const_iterator _begin;
+    const std::vector<int>::const_iterator _end;
 
     int size() const { return std::distance(_begin, _end); }
 };

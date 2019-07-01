@@ -245,22 +245,21 @@ int main(int argc, char** argv)
 
         S.notifyCNFUnits();
 
-        if (opt_bliss || opt_breakid) {
-            gzFile in_sym = (argc == 1) ? gzdopen(0, "rb") : opt_breakid ? gzopen(symloc.c_str(), "rb") : gzopen(sym_file_bliss.c_str(), "rb");
+        gzFile in_sym = (argc == 1) ? gzdopen(0, "rb") : opt_breakid ? gzopen(symloc.c_str(), "rb") : gzopen(sym_file_bliss.c_str(), "rb");
 
-            if (in_sym!=NULL){
-                if (opt_breakid) {
-                    parse_SYMMETRY(in_sym, S, linear_sym_gens);
-                    gzclose(in_sym);
-                } else if (opt_bliss) {
-                    parse_SYMMETRY_BLISS(in_sym, S);
-                    gzclose(in_sym);
-                }
-
-            }else{
-                printf("c Did not find .sym symmetry file. Assuming no symmetry is provided.\n");
+        if (in_sym!=NULL){
+            if (opt_breakid) {
+                parse_SYMMETRY(in_sym, S, linear_sym_gens);
+                gzclose(in_sym);
+            } else if (opt_bliss) {
+                parse_SYMMETRY_BLISS(in_sym, S);
+                gzclose(in_sym);
             }
+
+        }else{
+            printf("c Did not find .sym symmetry file. Assuming no symmetry is provided.\n");
         }
+
       if (S.verbosity > 0){
             printf("c ========================================[ Problem Statistics ]===========================================\n");
             printf("c |                                                                                                       |\n"); }

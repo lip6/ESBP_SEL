@@ -51,9 +51,7 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 #ifndef Glucose_SolverTypes_h
 #define Glucose_SolverTypes_h
 
-#include <memory>
 #include <set>
-#include <iostream>
 
 #include <assert.h>
 #include <stdint.h>
@@ -90,6 +88,7 @@ struct Lit {
     bool operator != (Lit p) const { return x != p.x; }
     bool operator <  (Lit p) const { return x < p.x;  } // '<' makes p, ~p adjacent in the ordering.
 };
+
 
 inline  Lit  mkLit     (Var var, bool sign = false) { Lit p; p.x = var + var + (int)sign; return p; }
 inline  Lit  operator ~(Lit p)              { Lit q; q.x = p.x ^ 1; return q; }
@@ -155,16 +154,13 @@ inline lbool toLbool(int   v) { return lbool((uint8_t)v);  }
 
 class Clause;
 class SymGenerator;
-
 typedef RegionAllocator<uint32_t>::Ref CRef;
 
 #define BITS_LBD 13
 #define BITS_SIZEWITHOUTSEL 18
 #define BITS_REALSIZE 20
 class Clause {
- public:
-    std::shared_ptr< std::set<SymGenerator*> > perms;
- private:
+    std::set<SymGenerator*>* perms;
     struct {
       unsigned mark       : 2;
       unsigned learnt     : 1;
@@ -187,8 +183,8 @@ class Clause {
 
     // NOTE: This constructor cannot be used directly (doesn't allocate enough memory).
     template<class V>
-    Clause(const V& ps, int _extra_size, bool learnt, bool fsymmetry, bool symmetry) {
-        perms = nullptr;
+    Clause(const V& ps, int _extra_size, bool learnt, bool fsymmetry, bool symmetry, std::set<SymGenerator*>* p) {
+        perms = p;
 	assert(_extra_size < (1<<2));
         header.mark      = 0;
         header.learnt    = learnt;
@@ -233,15 +229,12 @@ public:
 						    }
 						}
     header.size -= i; }
+    std::set<SymGenerator*>* scompat() const { return perms; }
+
     void         pop         ()              { shrink(1); }
     bool         learnt      ()      const   { return header.learnt; }
-    bool         symmetry    ()      const   { return header.symmetry; }
     bool         fsymmetry   ()      const   { return header.fsymmetry; }
-    std::set<SymGenerator*>* scompat()   const   { return perms.get(); }
-
-    const std::shared_ptr<std::set<SymGenerator*>>& compatiblePerms() const { return perms; }
-    std::shared_ptr<std::set<SymGenerator*>>& compatiblePerms() { return perms; }
-
+    bool         symmetry    ()      const   { return header.symmetry; }
     bool         has_extra   ()      const   { return header.extra_size > 0; }
     uint32_t     mark        ()      const   { return header.mark; }
     void         mark        (uint32_t m)    { header.mark = m; }
@@ -305,7 +298,8 @@ class ClauseAllocator : public RegionAllocator<uint32_t>
         RegionAllocator<uint32_t>::moveTo(to); }
 
     template<class Lits>
-    CRef alloc(const Lits& ps, bool learnt = false, bool imported = false, bool fsymmetry = false,  bool symmetry = false)
+        CRef alloc(const Lits& ps, bool learnt = false, bool imported = false,
+                   bool fsymmetry = false, bool symmetry = false, std::set<SymGenerator*>* p = nullptr)
     {
         assert(sizeof(Lit)      == sizeof(uint32_t));
         assert(sizeof(float)    == sizeof(uint32_t));
@@ -313,7 +307,7 @@ class ClauseAllocator : public RegionAllocator<uint32_t>
         bool use_extra = learnt | extra_clause_field;
         int extra_size = imported?3:(use_extra?1:0);
         CRef cid = RegionAllocator<uint32_t>::alloc(clauseWord32Size(ps.size(), extra_size));
-        new (lea(cid)) Clause(ps, extra_size, learnt, fsymmetry, symmetry);
+        new (lea(cid)) Clause(ps, extra_size, learnt, fsymmetry, symmetry, p);
 
         return cid;
     }
@@ -328,7 +322,6 @@ class ClauseAllocator : public RegionAllocator<uint32_t>
     void free(CRef cid)
     {
         Clause& c = operator[](cid);
-        c.perms = nullptr;
         RegionAllocator<uint32_t>::free(clauseWord32Size(c.size(), c.has_extra()));
     }
 
@@ -338,15 +331,16 @@ class ClauseAllocator : public RegionAllocator<uint32_t>
 
         if (c.reloced()) { cr = c.relocation(); return; }
 
-        cr = to.alloc(c, c.learnt(), c.wasImported(), c.fsymmetry(), c.symmetry());
+        cr = to.alloc(c, c.learnt(), c.wasImported(), c.fsymmetry(), c.symmetry(), c.scompat());
         c.relocate(cr);
 
+        // DEBUG
+        if (c.symmetry())
+            assert(to[cr].symmetry());
 
         // Copy extra data-fields:
         // (This could be cleaned-up. Generalize Clause-constructor to be applicable here instead?)
         to[cr].mark(c.mark());
-        to[cr].compatiblePerms() = std::move(c.compatiblePerms());
-
         if (to[cr].learnt())        {
 	  to[cr].activity() = c.activity();
 	  to[cr].setLBD(c.lbd());
@@ -538,7 +532,7 @@ private:
     }
 
 public:
-    SymGenerator(vec<Lit>& from, vec<Lit>& to) {
+    SymGenerator(vec<Lit>& from, vec<Lit>& to){
         assert(from.size()==to.size());
         offset = INT_MAX;
         int maxVar = INT_MIN;
@@ -566,7 +560,6 @@ public:
             addImage(from[i],to[i]);
         }
     }
-
 
     bool stabilize(const vec<Lit>& clause) const {
         for (int i=0; i<clause.size(); i++) {
@@ -617,16 +610,6 @@ public:
 };
 
 }
-
-namespace std {
-template <>
-struct hash<Glucose::Lit> {
-    size_t operator()(const Glucose::Lit& literal) const {
-        return literal.x;
-    }
-};
-} // namespace std
-
 
 
 #endif

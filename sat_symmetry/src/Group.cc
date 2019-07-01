@@ -32,7 +32,8 @@ void Group::addPermutation(std::unique_ptr<Permutation>&& permutation) {
 
         for (const Literal& image : permutation->cycle(c)) {
             const int index = image.variable().value();
-            _watchers[index].insert(permutation_index);
+            if (image.isPositive())
+                _watchers[index].push_back(permutation_index);
 
             const BooleanVariable variable = image.variable();
             _symmetric.insert(variable);
