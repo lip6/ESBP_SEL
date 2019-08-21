@@ -260,8 +260,9 @@ void Solver::cancelUntil(int lvl) {
                 polarity[x] = sign(trail[c]);
             insertVarOrder(x); }
         qhead = trail_lim[lvl];
-				qhead_gen = trail_lim[lvl];
-				qhead_sel = trail_lim[lvl];
+        qhead_gen = trail_lim[lvl];
+        qhead_sel = trail_lim[lvl];
+        watchidx = 0;
         trail.shrink(trail.size() - trail_lim[lvl]);
         trail_lim.shrink(trail_lim.size() - lvl);
 		    if(lvl==0){
@@ -487,14 +488,14 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool &o
     }
 
     // Add stabilizer
-    for (int i=0; i<generators.size(); i++) {
+    /* for (int i=0; i<generators.size(); i++) {
         SymGenerator *g = generators[i];
         if(comp->find(g) != comp->end())
             continue;
 
         if (g->stabilize(out_learnt))
             comp->insert(g);
-    }
+            }*/
 
 
 
@@ -634,8 +635,10 @@ StartPropagate:
 	if (symmetry) {
 		symmetry->updateNotify(p);
 	        CRef cr = learntSymmetryClause(cosy::ClauseInjector::ESBP, p);
-                if (opt_stop_prop && cr != CRef_Undef)
+                if (opt_stop_prop && cr != CRef_Undef) {
+                    qhead = trail.size();
                     return cr;
+                }
 	}
         for (i = j = (Watcher*)ws, end = i + ws.size();  i != end;){
             // Try to avoid inspecting the clause:
@@ -682,6 +685,7 @@ StartPropagate:
     }
 
 		vec<Lit> symmetrical;
+#if 0
 	/*** first check existing symmetrical clauses ***/
 		for(; confl == CRef_Undef && qhead_sel<trail.size(); ++qhead_sel){
 			Lit prop = trail[qhead_sel];
@@ -767,8 +771,7 @@ StartPropagate:
 				}
 			}
 		}
-
-
+#endif
 	/*** check for new symmetrical clauses ***/
 		for(; confl == CRef_Undef && qhead_gen<trail.size(); ++qhead_gen, watchidx=0){ // do generator symmetry propagation
 			Lit currentGenLit = trail[qhead_gen];
@@ -800,8 +803,10 @@ StartPropagate:
 					minimizeClause(symmetrical);
 					if(symmetrical.size()<2){
 						assert(symmetrical.size()==1);
+                                                assert(false);
 						cancelUntil(0);
 						if(value(symmetrical[0])==l_Undef){ // unit clause
+                                                    assert(false);
 							++symgenprops;
 							uncheckedEnqueue(symmetrical[0]);
 							goto StartPropagate;
@@ -816,7 +821,7 @@ StartPropagate:
 					assert(value(symmetrical[1])==l_False);
 					confl = addClauseFromSymmetry(ca[reason_cgl], symmetrical);
 
-					assert(result==0 | confl==CRef_Undef); // propagating result should lead to undef clause
+					assert(result==0 || confl==CRef_Undef); // propagating result should lead to undef clause
 					// NOTE: it is possible that (confl==CRef_Undef) & (result==0), if the symmetrical clause was a unit clause at some level, but has been made conflicting at a higher level. We treat this as a unit clause
 
 					if(confl==CRef_Undef){ // unit clause
@@ -1221,6 +1226,10 @@ lbool Solver::solve_()
         printf("===============================================================================\n");
 
 
+    for (int i=0; i<trail_lim[0]; i++)
+        printf("%s%d 0\n", sign(trail[i])?"-":"", var(trail[i])+1);
+
+
     if (status == l_True){
         // Extend & copy model:
         model.growTo(nVars());
@@ -1501,12 +1510,13 @@ void Solver::minimizeClause(vec<Lit>& cl){
 CRef Solver::addClauseFromSymmetry(const Clause& original, vec<Lit>& symmetrical){
 	assert(symmetrical.size()>0);
 
-	CRef cr = ca.alloc(symmetrical, true, original.symmetry(), original.scompat()); // TODO
+	CRef cr = ca.alloc(symmetrical, true, original.symmetry(), original.scompat());
 	learnts.push(cr);
 	attachClause(cr);
 	claBumpActivity(ca[cr]);
 	if(symmetrical.size()<=1){
-		cancelUntil(0);
+            assert(false);
+            cancelUntil(0);
 	}else{
 		cancelUntil(level(var(symmetrical[1])));
 		assert(value(symmetrical[1])==l_False);
@@ -1558,13 +1568,30 @@ CRef Solver::learntSymmetryClause(cosy::ClauseInjector::Type type, Lit p) {
         if (symmetry->hasClauseToInject(type, p)) {
             std::vector<Lit> vsbp = symmetry->clauseToInject(type, p);
 
-            // Dirty make a copy of vector
+
+            vec<Lit> sbp;
+            int max_i = 0;
+            int lvl = level(var(vsbp[max_i]));
+
+            int i = 0;
+            for (Lit l : vsbp) {
+                sbp.push(l);
+                if (i > 1 && level(var(l)) > lvl) {
+                    max_i = i;
+                    lvl = level(var(vsbp[max_i]));
+                }
+                i++;
+            }
+            if (max_i != 0)
+                std::swap(sbp[0], sbp[max_i]);
+
+            /*
             vec<Lit> sbp;
             for (Lit l : vsbp) {
                 assert(value(l) == l_False);
                 sbp.push(l);
             }
-
+            */
             std::set<SymGenerator*>* comp = new std::set<SymGenerator*>();
 
             for(int i=0; i<generators.size(); ++i) {
