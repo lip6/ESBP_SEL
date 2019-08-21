@@ -25,6 +25,7 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 
 #include "minisat/utils/ParseUtils.h"
 #include "minisat/core/SolverTypes.h"
+#include "minisat/mtl/Matrix.h"
 
 namespace Minisat {
 
@@ -74,12 +75,100 @@ static void parse_DIMACS_main(B& in, Solver& S, bool strictp = false) {
         printf("PARSE ERROR! DIMACS header mismatch: wrong number of clauses\n");
 }
 
+template<class B, class Solver>
+static void parse_SYMMETRY_main(B& in, Solver& S, bool linear_sym_gens) {
+	vec<Lit> from;
+	vec<Lit> to;
+	vec<Lit> cycle;
+	for (;;){
+		skipWhitespace(in);
+		if (*in == EOF) {
+			break;
+		} else if (*in == '('){
+			// clear from/to to start a new symmetry
+			from.clear(); to.clear();
+			while(*in != '\n'){ // parse one symmetry
+				cycle.clear();
+				++in; // skipping '('
+				++in; // skipping ' '
+				while(*in != ')'){ // parse one cycle
+					int parsed_lit = parseInt(in);
+					int var = abs(parsed_lit)-1;
+					Lit l = (parsed_lit > 0) ? mkLit(var) : ~mkLit(var);
+					cycle.push(l);
+					++in; // skipping ' '
+				}
+				// add cycle to from/to
+				for(int i=0; i<cycle.size()-1; ++i){
+					from.push(cycle[i]);
+					to.push(cycle[i+1]);
+				}
+				if(cycle.size()>0){
+					from.push(cycle.last());
+					to.push(cycle[0]);
+				}
+				++in; // skipping ')'
+				++in; // skipping ' '
+			}
+			++in; // skipping '/n'
+			S.addGenerator(new SymGenerator(from,to));
+		} else if (*in == 'r'){
+			// interchangeability matrix
+			++in; ++in; ++in; ++in; // skipping "rows"
+			int nbRows = parseInt(in);
+			++in; ++in; ++in; ++in; ++in; ++in; ++in; ++in; // skipping " columns"
+			int nbColumns = parseInt(in);
+			matrix<Lit> symmat(nbRows,nbColumns);
+			for(int i=0; i<nbRows; ++i){
+				for(int j=0; j<nbColumns; ++j){
+					int parsed_lit = parseInt(in);
+					int var = abs(parsed_lit)-1;
+					Lit l = (parsed_lit > 0) ? mkLit(var) : ~mkLit(var);
+					symmat.set(i,j,l);
+				}
+			}
+			if(linear_sym_gens){
+				for(int i=0; i<symmat.nr; ++i){
+					int j=(i+1)%symmat.nr;
+					from.clear(); to.clear();
+					for(int k=0; k<symmat.nc; ++k){
+						from.push(symmat.get(i,k)); from.push(symmat.get(j,k));
+						to.push(symmat.get(j,k));   to.push(symmat.get(i,k));
+					}
+					S.addGenerator(new SymGenerator(from,to));
+				}
+			}else{
+				for(int i=0; i<symmat.nr; ++i){
+					for(int j=i+1; j<symmat.nr; ++j){
+						from.clear(); to.clear();
+						for(int k=0; k<symmat.nc; ++k){
+							from.push(symmat.get(i,k)); from.push(symmat.get(j,k));
+							to.push(symmat.get(j,k));   to.push(symmat.get(i,k));
+						}
+						S.addGenerator(new SymGenerator(from,to));
+					}
+				}
+			}
+			++in; // skipping "\n"
+		} else {
+			skipLine(in);
+		}
+	}
+	S.initiateGenWatches();
+}
+
+
 // Inserts problem into solver.
 //
 template<class Solver>
 static void parse_DIMACS(gzFile input_stream, Solver& S, bool strictp = false) {
     StreamBuffer in(input_stream);
     parse_DIMACS_main(in, S, strictp); }
+
+template<class Solver>
+static void parse_SYMMETRY(gzFile input_stream, Solver& S, bool linear_sym_gens) {
+	StreamBuffer in(input_stream);
+	parse_SYMMETRY_main(in, S, linear_sym_gens); }
 
 //=================================================================================================
 }

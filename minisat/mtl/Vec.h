@@ -69,6 +69,9 @@ public:
     void     growTo   (Size size);
     void     growTo   (Size size, const T& pad);
     void     clear    (bool dealloc = false);
+    void     shrinkTo_(int size)       { assert(size <= sz); assert(size>=0); sz = size;}
+    void     assign   (int size, const T& pad) { clear(); growTo(size,pad); }
+    void     swapErase (int index)     { data[index] = last(); pop(); }
 
     // Stack interface:
     void     push  (void)              { if (sz == cap) capacity(sz+1); new (&data[sz]) T(); sz++; }

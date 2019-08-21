@@ -27,6 +27,8 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 #include "minisat/core/Dimacs.h"
 #include "minisat/simp/SimpSolver.h"
 
+#include <string>
+
 using namespace Minisat;
 
 //=================================================================================================
@@ -66,6 +68,7 @@ int main(int argc, char** argv)
         IntOption    cpu_lim("MAIN", "cpu-lim","Limit on CPU time allowed in seconds.\n", 0, IntRange(0, INT32_MAX));
         IntOption    mem_lim("MAIN", "mem-lim","Limit on memory usage in megabytes.\n", 0, IntRange(0, INT32_MAX));
         BoolOption   strictp("MAIN", "strict", "Validate DIMACS header during parsing.", false);
+        BoolOption   linear_sym_gens   ("MAIN", "linear-sym-gens", "Use a linear number of generators for row interchangeability.", false);
 
         parseOptions(argc, argv, true);
         
@@ -88,21 +91,35 @@ int main(int argc, char** argv)
         if (argc == 1)
             printf("Reading from standard input... Use '--help' for help.\n");
 
-        gzFile in = (argc == 1) ? gzdopen(0, "rb") : gzopen(argv[1], "rb");
+				std::string cnfloc = argv[1];
+				gzFile in = (argc == 1) ? gzdopen(0, "rb") : gzopen(cnfloc.c_str(), "rb");
         if (in == NULL)
-            printf("ERROR! Could not open file: %s\n", argc == 1 ? "<stdin>" : argv[1]), exit(1);
+            printf("ERROR! Could not open file: %s\n", argc == 1 ? "<stdin>" : cnfloc.c_str()), exit(1);
+
+				parse_DIMACS(in, S, (bool)strictp);
+				gzclose(in);
+
+				std::string symloc = cnfloc+".sym";
+				gzFile in_sym = (argc == 1) ? gzdopen(0, "rb") : gzopen(symloc.c_str(), "rb");
+
+				if (in_sym!=NULL){
+					printf("Found .sym symmetry file.\n");
+				  parse_SYMMETRY(in_sym, S, linear_sym_gens);
+				  gzclose(in_sym);
+				}else{
+				  printf("Did not find .sym symmetry file. Assuming no symmetry is provided.\n");
+				}
         
         if (S.verbosity > 0){
             printf("============================[ Problem Statistics ]=============================\n");
             printf("|                                                                             |\n"); }
-        
-        parse_DIMACS(in, S, (bool)strictp);
-        gzclose(in);
+
         FILE* res = (argc >= 3) ? fopen(argv[2], "wb") : NULL;
 
         if (S.verbosity > 0){
             printf("|  Number of variables:  %12d                                         |\n", S.nVars());
-            printf("|  Number of clauses:    %12d                                         |\n", S.nClauses()); }
+            printf("|  Number of clauses:    %12d                                         |\n", S.nClauses());
+	          printf("|  Number of sym generators: %8d                                         |\n", S.nGenerators()); }
         
         double parsed_time = cpuTime();
         if (S.verbosity > 0)

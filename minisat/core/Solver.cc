@@ -101,11 +101,27 @@ Solver::Solver() :
   , conflict_budget    (-1)
   , propagation_budget (-1)
   , asynch_interrupt   (false)
-{}
+	, qhead_gen(0)
+	, watchidx(0)
+	, qhead_sel(0)
+	, symgenprops(0)
+	, symgenconfls(0)
+	, symselprops(0)
+	, symselconfls(0)
+{
+	selIdx.push(0);
+	genWatchIndices.push(0);
+}
 
 
 Solver::~Solver()
 {
+	for(int i=0; i<generators.size(); ++i){
+		delete generators[i];
+	}
+	for(int i=0; i<selClauseWatches.size(); ++i){
+		delete selClauseWatches[i];
+	}
 }
 
 
@@ -136,6 +152,9 @@ Var Solver::newVar(lbool upol, bool dvar)
     decision .reserve(v);
     trail    .capacity(v+1);
     setDecisionVar(v, dvar);
+		selClauseWatches.push(new vec<int>());
+		selClauseWatches.push(new vec<int>());
+		genWatchIndices.push(genWatches.size());
     return v;
 }
 
@@ -228,17 +247,36 @@ bool Solver::satisfied(const Clause& c) const {
 
 // Revert to the state at given level (keeping all assignment at 'level' but not beyond).
 //
-void Solver::cancelUntil(int level) {
-    if (decisionLevel() > level){
-        for (int c = trail.size()-1; c >= trail_lim[level]; c--){
+void Solver::cancelUntil(int lvl) {
+    if (decisionLevel() > lvl){
+        for (int c = trail.size()-1; c >= trail_lim[lvl]; c--){
             Var      x  = var(trail[c]);
             assigns [x] = l_Undef;
             if (phase_saving > 1 || (phase_saving == 1 && c > trail_lim.last()))
                 polarity[x] = sign(trail[c]);
             insertVarOrder(x); }
-        qhead = trail_lim[level];
-        trail.shrink(trail.size() - trail_lim[level]);
-        trail_lim.shrink(trail_lim.size() - level);
+        qhead = trail_lim[lvl];
+				qhead_gen = trail_lim[lvl];
+				qhead_sel = trail_lim[lvl];
+        trail.shrink(trail.size() - trail_lim[lvl]);
+        trail_lim.shrink(trail_lim.size() - lvl);
+		    if(lvl==0){
+			    for(int i=0; i<selClauseWatches.size(); ++i){
+				    selClauseWatches[i]->clear();
+			    }
+			    selClauses.clear();
+			    selIdx.clear(); selIdx.push(0);
+			    selGen.clear();
+			    selProp.clear();
+		    }else{
+			    while(selProp.size()>0 && level(selProp.last())>lvl){
+				    selProp.pop();
+			    }
+			    selGen.shrinkTo_(selProp.size());
+			    selIdx.shrinkTo_(selProp.size()+1);
+			    assert(selIdx.size()>0);
+			    selClauses.shrinkTo_(selIdx.last());
+		    }
     } }
 
 
@@ -507,7 +545,7 @@ CRef Solver::propagate()
 {
     CRef    confl     = CRef_Undef;
     int     num_props = 0;
-
+StartPropagate:
     while (qhead < trail.size()){
         Lit            p   = trail[qhead++];     // 'p' is enqueued fact to propagate.
         vec<Watcher>&  ws  = watches.lookup(p);
@@ -557,6 +595,161 @@ CRef Solver::propagate()
         }
         ws.shrink(i - j);
     }
+
+		vec<Lit> symmetrical;
+	/*** first check existing symmetrical clauses ***/
+		for(; confl == CRef_Undef && qhead_sel<trail.size(); ++qhead_sel){
+			Lit prop = trail[qhead_sel];
+			vec<int>& clWatches = *(selClauseWatches[toInt(prop)]);
+
+			int watchedclause_i = 0;
+			while(watchedclause_i < clWatches.size()){
+				int currentclause = clWatches[watchedclause_i];
+				if(currentclause >= selProp.size()){ // no more such clause, erase watch
+					clWatches.swapErase(watchedclause_i);
+					continue;
+				}
+				assert(selIdx.size()>currentclause+1);
+
+				// find watched literal
+				int c_start = selIdx[currentclause];
+				if(value(selClauses[c_start])==l_True || value(selClauses[c_start+1])==l_True){ // either watched literal is true, ignore this satisfied clause
+					// NOTE: the case where this watched literal is indeed true is due to lazily cleaning up the watched literals, so sometimes an uncleaned literal points to an existing opposed watch by accident
+					++watchedclause_i;
+					continue;
+				}
+
+				clWatches.swapErase(watchedclause_i); // all remaining cases will erase this watch
+				int watch = 0;
+				while(selClauses[c_start+watch]!=~prop && watch<2){
+					++watch;
+				}
+				if(watch>=2){ // watched literal has become invalid (e.g. clause already added), erase watch
+					continue;
+				}
+				// find new watch, otherwise unit or conflicting
+				int c_end = selIdx[currentclause+1];
+				watch += c_start; // now watch is the absolute index of the watch, instead of the index relative to c_start
+				assert(value(selClauses[watch])==l_False);
+				for(int i=c_start+2; i<c_end; ++i){
+					if(value(selClauses[i])!=l_False){
+						Lit tmp = selClauses[i];
+						selClauses[i]=selClauses[watch];
+						selClauses[watch]=tmp;
+						break;
+					}
+				}
+				if(value(selClauses[watch])!=l_False){ // new watch found, erase old, create new
+					selClauseWatches[toInt(~selClauses[watch])]->push(currentclause);
+					continue;
+				}
+
+				// unit or conflicting clause
+				assert(value(selClauses[watch])==l_False);
+
+				// create new learned clause
+				selGen[currentclause]->getSymmetricalClause(ca[reason(selProp[currentclause])],symmetrical);
+				minimizeClause(symmetrical);
+				if(symmetrical.size()<2){
+					assert(symmetrical.size()==1);
+					cancelUntil(0);
+					if(value(symmetrical[0])==l_Undef){ // unit clause
+						++symselprops;
+						uncheckedEnqueue(symmetrical[0]);
+						goto StartPropagate;
+					} else if (value(symmetrical[0])==l_False){ // conflict clause
+						++symselconfls;
+						confl = CRef_Unsat;
+						goto ConflDetected;
+					}
+				}
+				assert(symmetrical.size()>1);
+				prepareWatches(symmetrical);
+
+				assert(value(symmetrical[1])==l_False);
+				confl = addClauseFromSymmetry(symmetrical);
+				if(confl==CRef_Undef){ // unit clause
+					++symselprops;
+					goto StartPropagate; // TODO: fix useless iteration over previous watches (i)
+				}else{ // conflict clause
+					++symselconfls;
+					goto ConflDetected;
+				}
+			}
+		}
+
+
+	/*** check for new symmetrical clauses ***/
+		for(; confl == CRef_Undef && qhead_gen<trail.size(); ++qhead_gen, watchidx=0){ // do generator symmetry propagation
+			Lit currentGenLit = trail[qhead_gen];
+			assert(level(var(currentGenLit))==decisionLevel());
+
+			int watchStart = genWatchIndices[var(currentGenLit)];
+			int watchEnd = genWatchIndices[var(currentGenLit)+1];
+
+			if(level(var(currentGenLit))==0){ // NOTE: special purpose level 0 method needed as not all level 0 propagations have a reason clause attached to it
+				assert(decisionLevel()==0);
+				for(int i=watchStart; i<watchEnd; ++i){
+					Lit symlit=genWatches[i]->getImage(currentGenLit);
+					if(value(symlit)==l_Undef){ // unit clause
+						++symgenprops;
+						uncheckedEnqueue(symlit);
+						goto StartPropagate;
+					} else if (value(symlit)==l_False){ // conflict clause
+						++symgenconfls;
+						confl = CRef_Unsat;
+						goto ConflDetected;
+					}
+				}
+			}
+
+			CRef reason_cgl = reason(var(currentGenLit));
+			if(reason_cgl==CRef_Undef){
+				continue; // choice literal
+			}
+
+			for(; watchidx<watchEnd-watchStart; ++watchidx){
+				SymGenerator* g = genWatches[watchStart+watchidx];
+				assert(g->permutes(currentGenLit));
+				int result = addSelClause(g, currentGenLit);
+				if(result<2){ // either conflict or unit clause
+					g->getSymmetricalClause(ca[reason_cgl],symmetrical);
+					minimizeClause(symmetrical);
+					if(symmetrical.size()<2){
+						assert(symmetrical.size()==1);
+						cancelUntil(0);
+						if(value(symmetrical[0])==l_Undef){ // unit clause
+							++symgenprops;
+							uncheckedEnqueue(symmetrical[0]);
+							goto StartPropagate;
+						} else if (value(symmetrical[0])==l_False){ // conflict clause
+							++symgenconfls;
+							confl = CRef_Unsat;
+							goto ConflDetected;
+						}
+					}
+					assert(symmetrical.size()>1);
+					prepareWatches(symmetrical);
+					assert(value(symmetrical[1])==l_False);
+					confl = addClauseFromSymmetry(symmetrical);
+
+					assert(result==0 | confl==CRef_Undef); // propagating result should lead to undef clause
+					// NOTE: it is possible that (confl==CRef_Undef) & (result==0), if the symmetrical clause was a unit clause at some level, but has been made conflicting at a higher level. We treat this as a unit clause
+
+					if(confl==CRef_Undef){ // unit clause
+						++symgenprops;
+						goto StartPropagate;
+					}else{ // conflict clause
+						++symgenconfls;
+						goto ConflDetected;
+					}
+				}
+			}
+		}
+		assert(testSelClauses());
+
+ConflDetected:
+
     propagations += num_props;
     simpDB_props -= num_props;
 
@@ -737,7 +930,7 @@ lbool Solver::search(int nof_conflicts)
                 max_learnts             *= learntsize_inc;
 
                 if (verbosity >= 1)
-                    printf("| %9d | %7d %8d %8d | %8d %8d %6.0f | %6.3f %% |\n", 
+                    printf("| %9d | %7d %8d %8d | %8d %8d %6.0f | %6.3f %% |\n",
                            (int)conflicts, 
                            (int)dec_vars - (trail_lim.size() == 0 ? trail.size() : trail_lim[0]), nClauses(), (int)clauses_literals, 
                            (int)max_learnts, nLearnts(), (double)learnts_literals/nLearnts(), progressEstimate()*100);
@@ -841,6 +1034,23 @@ lbool Solver::solve_()
     model.clear();
     conflict.clear();
     if (!ok) return l_False;
+
+		if(solves==0){
+			vec<double> occs;
+			occs.growTo(2*nVars(),0.0);
+			for(int i=0; i<nClauses(); ++i){
+				const Clause &c = ca[clauses[i]];
+				double increment = 1/(double)(c.size()*c.size());
+				for(int j=0; j<c.size(); ++j){
+					occs[toInt(c[j])]=occs[toInt(c[j])]+increment;
+				}
+			}
+			for(int i=0; i<nVars(); ++i){
+				polarity[i]=occs[2*i]<=occs[2*i+1]; // initial polarity is set to true if the negative lit occurs at least as much as the positive in the theory.
+				activity[i]=occs[2*i]*occs[2*i+1];
+			}
+			rebuildOrderHeap();
+		}
 
     solves++;
 
@@ -994,8 +1204,12 @@ void Solver::printStats() const
     double mem_used = memUsedPeak();
     printf("restarts              : %"PRIu64"\n", starts);
     printf("conflicts             : %-12"PRIu64"   (%.0f /sec)\n", conflicts   , conflicts   /cpu_time);
+    printf("symgenconfls          : %-12" PRIu64"   (%.0f /sec)\n", symgenconfls   , symgenconfls/cpu_time);
+    printf("symselconfls          : %-12" PRIu64"   (%.0f /sec)\n", symselconfls   , symselconfls/cpu_time);
     printf("decisions             : %-12"PRIu64"   (%4.2f %% random) (%.0f /sec)\n", decisions, (float)rnd_decisions*100 / (float)decisions, decisions   /cpu_time);
     printf("propagations          : %-12"PRIu64"   (%.0f /sec)\n", propagations, propagations/cpu_time);
+    printf("symgenprops           : %-12" PRIu64"   (%.0f /sec)\n", symgenprops    , symgenprops /cpu_time);
+    printf("symselprops           : %-12" PRIu64"   (%.0f /sec)\n", symselprops    , symselprops /cpu_time);
     printf("conflict literals     : %-12"PRIu64"   (%4.2f %% deleted)\n", tot_literals, (max_literals - tot_literals)*100 / (double)max_literals);
     if (mem_used != 0) printf("Memory used           : %.2f MB\n", mem_used);
     printf("CPU time              : %g s\n", cpu_time);
@@ -1063,4 +1277,197 @@ void Solver::garbageCollect()
         printf("|  Garbage collection:   %12d bytes => %12d bytes             |\n", 
                ca.size()*ClauseAllocator::Unit_Size, to.size()*ClauseAllocator::Unit_Size);
     to.moveTo(ca);
+}
+
+void Solver::addGenerator(SymGenerator* g){
+	generators.push(g);
+}
+
+/*
+ puts true literal in front,
+ if none exists, puts 2 unknown in front,
+ if none exist, puts 1 unknown in front and highest false
+ if none exists, puts highest false in front, and second highest false second
+*/
+void Solver::prepareWatches(vec<Lit>& c){
+	assert(c.size()>0);
+	if(value(c[0])==l_True){
+		return;
+	}
+	for(int i=1; i<c.size(); ++i){
+		if(value(c[i])==l_True){
+			return; // one true lit
+		}else if(value(c[i])==l_Undef){
+			if(value(c[0])==l_Undef){
+				Lit tmp = c[1]; c[1]=c[i]; c[i]=tmp;
+				return; // two unknown lits
+			}else{
+				Lit tmp = c[0]; c[0]=c[i]; c[i]=c[1]; c[1]=tmp;
+			}
+		}else{ // value(c[i])==l_False
+			if(value(c[0])==l_False && level(var(c[0]))<level(var(c[i])) ){
+				Lit tmp = c[0]; c[0]=c[i]; c[i]=c[1]; c[1]=tmp;
+			}else if(level(var(c[1]))<level(var(c[i])) ){
+				assert(value(c[1])==l_False);
+				Lit tmp = c[1]; c[1]=c[i]; c[i]=tmp;
+			}
+		}
+	}
+	// either one unknown lit or all false
+}
+
+// minimize clause through self-subsumption
+// NOTE: some clauses at level 0 have no unit clause as reason, so ugly code ahead
+void Solver::minimizeClause(vec<Lit>& cl){
+	vec<int> minimizeTmpVec;
+	minimizeTmpVec.growTo(cl.size());
+	for(int i=0; i<cl.size(); ++i){
+		int vcli = var(cl[i]);
+		minimizeTmpVec[i]=vcli;
+		assert(seen[vcli]==0);
+		seen[vcli]=1; // mark as seen
+	}
+	for(int i=0; i<cl.size() && cl.size()>1; ++i){
+		if(value(cl[i])!=l_False){
+			continue;
+		}
+		if(level(var(cl[i]))==0){
+			cl.swapErase(i);
+			--i;
+		}else if(reason(var(cl[i]))!=CRef_Undef){
+			const Clause& expl = ca[reason(var(cl[i]))];
+			bool allSeen = true;
+			for(int j=0; j<expl.size(); ++j){
+				int var_j = var(expl[j]);
+				if(level(var_j)!=0 && !seen[var_j]){
+					allSeen = false;
+					break;
+				}
+			}
+			if(allSeen){
+				cl.swapErase(i);
+				--i;
+			}
+		}
+	}
+	for(int i=0; i<minimizeTmpVec.size(); ++i){ // reset seen
+		seen[minimizeTmpVec[i]]=0;
+	}
+}
+
+// NOTE: sometimes backtracks to add unit clause instead of conflict clause
+CRef Solver::addClauseFromSymmetry(vec<Lit>& symmetrical){
+	assert(symmetrical.size()>0);
+
+	CRef cr = ca.alloc(symmetrical, true);
+	learnts.push(cr);
+	attachClause(cr);
+	claBumpActivity(ca[cr]);
+	if(symmetrical.size()<=1){
+		cancelUntil(0);
+	}else{
+		cancelUntil(level(var(symmetrical[1])));
+		assert(value(symmetrical[1])==l_False);
+	}
+
+	if(value(symmetrical[0])==l_Undef){
+		uncheckedEnqueue(symmetrical[0], cr);
+		return CRef_Undef; // unit clause, added to clause store
+	}
+	assert(value(symmetrical[0])==l_False);
+	return cr; // conflict clause, need to backtrack
+}
+
+int Solver::addSelClause(SymGenerator* g, Lit l){
+	CRef reason_l = reason(var(l));
+	assert(reason_l != CRef_Undef);
+	const Clause& c_l = ca[reason_l];
+	for(int i=0; i<c_l.size(); ++i){
+		if(value(g->getImage(c_l[i]))==l_True){ // unknown lits, keep in clause
+			return 2;
+		}
+	}
+	for(int i=0; i<c_l.size(); ++i){
+		Lit symLit = g->getImage(c_l[i]);
+		if(value(symLit)==l_Undef){ // unknown lits, keep in clause
+			selClauses.push(symLit);
+		} // else value is l_False, will never change, so can safely be ignored
+	}
+	int nbAddedLits = selClauses.size()-selIdx.last();
+	if(nbAddedLits < 2){
+		selClauses.shrink_(nbAddedLits);
+		return nbAddedLits; // propagating or conflict symmetrical clause
+	}
+
+	assert(decisionLevel()>0); // NOTE: level 0 means clauses of length 1, should have been handled earlier
+	assert(nbAddedLits>=2);
+	int selClauseId = selProp.size(); // id for selClause
+	selClauseWatches[toInt(~selClauses[selIdx.last()])]->push(selClauseId); // negation of first literal is watch
+	selClauseWatches[toInt(~selClauses[selIdx.last()+1])]->push(selClauseId); // negation of second literal is watch
+	selIdx.push(selClauses.size());
+	selGen.push(g);
+	selProp.push(var(l));
+
+	return 3;
+}
+
+bool Solver::testSelClauses(){
+	vec<Lit> symmetrical;
+	for(int cl=0; cl<selProp.size(); ++cl){
+		assert(selGen.size()==selProp.size());
+		assert(cl<selProp.size());
+		selGen[cl]->getSymmetricalClause(ca[reason(selProp[cl])],symmetrical);
+		for(int i=0; i<symmetrical.size(); ++i){
+			Lit symlit = symmetrical[i];
+			seen[var(symlit)]=(sign(symlit)?2:1);
+		}
+		for(int i=selIdx[cl]; i<selIdx[cl+1]; ++i){
+			Lit symlit = selClauses[i];
+			if(seen[var(symlit)]!=(sign(symlit)?2:1)){
+				printClause(symmetrical);
+				for(int j=selIdx[cl]; j<selIdx[cl+1]; ++j){
+					printf("%d ",toInt(selClauses[j]));
+				}
+				printf("-> faulty selClauseLiteral %d\n",toInt(symlit));
+				return false;
+			}
+		}
+		for(int i=0; i<symmetrical.size(); ++i){
+			seen[var(symmetrical[i])]=0;
+		}
+
+		for(int i=selIdx[cl]; i<selIdx[cl+1]; ++i){
+			Lit symlit = selClauses[i];
+			seen[var(symlit)]=(sign(symlit)?2:1);
+		}
+		for(int i=0; i<symmetrical.size(); ++i){
+			Lit symlit = symmetrical[i];
+			if(value(symlit)!=l_False && seen[var(symlit)]!=(sign(symlit)?2:1)){
+				printClause(symmetrical);
+				for(int j=selIdx[cl]; j<selIdx[cl+1]; ++j){
+					printf("%d ",toInt(selClauses[j]));
+				}
+				printf("-> missing selClauseLiteral %d\n",toInt(symlit));
+				return false;
+			}
+		}
+		for(int i=selIdx[cl]; i<selIdx[cl+1]; ++i){
+			seen[var(selClauses[i])]=0;
+		}
+	}
+	return true;
+}
+
+void Solver::initiateGenWatches(){
+	genWatches.clear();
+	genWatchIndices.clear();
+	genWatchIndices.push(0);
+	for(int v=0; v<nVars(); ++v){
+		for(int g=0; g<generators.size(); ++g){
+			if(generators[g]->permutes(mkLit(v))){
+				genWatches.push(generators[g]);
+			}
+		}
+		genWatchIndices.push(genWatches.size());
+	}
 }

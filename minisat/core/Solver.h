@@ -27,6 +27,7 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 #include "minisat/mtl/IntMap.h"
 #include "minisat/utils/Options.h"
 #include "minisat/core/SolverTypes.h"
+#include <utility>
 
 
 namespace Minisat {
@@ -294,6 +295,60 @@ protected:
     // Returns a random integer 0 <= x < size. Seed must never be 0.
     static inline int irand(double& seed, int size) {
         return (int)(drand(seed) * size); }
+
+private:
+	vec<SymGenerator*> generators;
+	int qhead_gen; // Head of queue (as index into the trail -- no more explicit propagation queue in MiniSat).
+	vec<SymGenerator*> genWatches;
+	vec<int> genWatchIndices;
+	int watchidx; // Index in list of watching symmetry generators
+
+/*** Symmetric Explanation Learning (SEL) data structures ***/
+	int qhead_sel; // Head of queue (as index into the trail -- no more explicit propagation queue in MiniSat).
+	vec<Lit> selClauses; // contiguous list of (shortened) symmetrical explanation clauses. Grows/shrinks as current assignment increases/decreases.
+	vec<int> selIdx; // start- and endpoint of each selClause. Idx[i] is start point of clause i, Idx[i+1] is end point.
+	vec<int> selProp; // original propagated variable for selClause
+	vec<SymGenerator*> selGen; // original generator for selClause
+	vec<vec<int>* > selClauseWatches; // map of Lits to selClauses, being the 0th or 1st lit of a symmetric explanation clause, which is watched on becoming true.
+
+	void minimizeClause(vec<Lit>& c); // minimize clause through self-subsumption
+	void prepareWatches(vec<Lit>& c); // prepares watches of a (new) clause
+	CRef addClauseFromSymmetry(vec<Lit>& symmetrical); // @pre: clause is unit or conflicting. Bool return value is true if the symmetrical clause is unit or conflicting. CRef return value is the conflicting clause, or CRef_Undef if the symmetrical clause is not conflicting.
+
+	// returns 0: conflict clause: added to learned clause store
+	// returns 1: unit clause:     added to learned clause store
+	// returns 2: satisfied:       ignored
+	// returns 3: unknown:         added to symmetric clause store
+	int addSelClause(SymGenerator* g, Lit l);
+
+	bool testSelClauses();
+
+public:
+	uint64_t symgenprops;
+	uint64_t symgenconfls;
+	uint64_t symselprops;
+	uint64_t symselconfls;
+	void addGenerator(SymGenerator* g);
+	void initiateGenWatches();
+
+	int nGenerators(){return generators.size();}
+
+	void printClause(vec<Lit>& cl){
+		for(int64_t i=0; i<cl.size(); ++i){
+			char val = 'a';
+			if(value(cl[i])==l_Undef){
+				val = 'u';
+			}else if(value(cl[i])==l_True){
+				val = 't';
+			}else if(value(cl[i])==l_False){
+				val = 'f';
+			}else{
+				val = 'x';
+			}
+			printf("%d|%c:%d ",toInt(cl[i]),val,level(var(cl[i])));
+		}
+		printf("\n");
+	}
 };
 
 

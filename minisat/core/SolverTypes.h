@@ -30,6 +30,7 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 #include "minisat/mtl/IntMap.h"
 #include "minisat/mtl/Map.h"
 #include "minisat/mtl/Alloc.h"
+#include "minisat/mtl/Matrix.h"
 
 namespace Minisat {
 
@@ -223,6 +224,7 @@ public:
 // ClauseAllocator -- a simple class for allocating memory for clauses:
 
 const CRef CRef_Undef = RegionAllocator<uint32_t>::Ref_Undef;
+const CRef CRef_Unsat = CRef_Undef-1;
 class ClauseAllocator
 {
     RegionAllocator<uint32_t> ra;
@@ -473,6 +475,79 @@ inline void Clause::strengthen(Lit p)
 }
 
 //=================================================================================================
+
+struct SymGenerator { // TODO: make the memory footprint smaller by not storing images of the largest asymmetric literals.
+private:
+	int offset;
+	vec<Lit> image; // image[v-offset] is the image of mkLit(v) under this generator
+
+	void addImage(Lit from, Lit to){
+		assert(var(from)-offset >= 0);
+		assert(var(from)-offset < image.size());
+		image[var(from)-offset]=to^sign(from);
+	}
+
+public:
+	SymGenerator(vec<Lit>& from, vec<Lit>& to){
+		assert(from.size()==to.size());
+		offset = INT_MAX;
+		int maxVar = INT_MIN;
+		for(int i=0; i<from.size(); ++i){
+			if(from[i]==to[i]){
+				continue; // no use considering lits mapping to themselves
+			}
+			if(var(from[i])<offset){
+				offset=var(from[i]);
+			}
+			if(var(from[i])>maxVar){
+				maxVar=var(from[i]);
+			}
+		}
+
+		image.growTo(maxVar-offset+1);
+		for(int i=offset; i<image.size()+offset; ++i){
+			addImage(mkLit(i),mkLit(i)); // now image is initiated as the identity
+		}
+
+		for(int i=0; i<from.size(); ++i){
+			if(from[i]==to[i]){
+				continue; // no use considering lits mapping to themselves
+			}
+			addImage(from[i],to[i]);
+		}
+	}
+
+	void print(){
+		for(int i=0; i<image.size(); ++i){
+			Lit l = mkLit(i+offset);
+			if(permutes(l)){
+				printf("%i:%i ",toInt(l), toInt(getImage(l)));
+			}
+		}
+		printf("\n");
+	}
+
+	inline Lit getImage(Lit l){
+		int index = var(l)-offset;
+		if(index<0 || index>=image.size()){
+			return l;
+		}
+		return image[index]^sign(l);
+	}
+
+	inline bool permutes(Lit l){
+		int index = var(l)-offset;
+		return (index>=0 && index<image.size() && (image[index]^sign(l))!=l);
+	}
+
+	void getSymmetricalClause(const Clause& in_clause, vec<Lit>& out_clause){
+		out_clause.clear();
+		out_clause.growTo(in_clause.size());
+		for(int i=0; i<in_clause.size(); ++i){
+			out_clause[i]=getImage(in_clause[i]);
+		}
+	}
+};
 }
 
 #endif
