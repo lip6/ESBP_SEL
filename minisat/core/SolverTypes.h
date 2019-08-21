@@ -22,6 +22,8 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 #ifndef Minisat_SolverTypes_h
 #define Minisat_SolverTypes_h
 
+#include <memory>
+#include <set>
 #include <assert.h>
 
 #include "minisat/mtl/IntTypes.h"
@@ -68,9 +70,9 @@ inline  bool sign      (Lit p)              { return p.x & 1; }
 inline  int  var       (Lit p)              { return p.x >> 1; }
 
 // Mapping Literals to and from compact integers suitable for array indexing:
-inline  int  toInt     (Var v)              { return v; } 
-inline  int  toInt     (Lit p)              { return p.x; } 
-inline  Lit  toLit     (int i)              { Lit p; p.x = i; return p; } 
+inline  int  toInt     (Var v)              { return v; }
+inline  int  toInt     (Lit p)              { return p.x; }
+inline  Lit  toLit     (int i)              { Lit p; p.x = i; return p; }
 
 //const Lit lit_Undef = mkLit(var_Undef, false);  // }- Useful special constants.
 //const Lit lit_Error = mkLit(var_Undef, true );  // }
@@ -88,7 +90,7 @@ class LSet : public IntSet<Lit, MkIndexLit>{};
 // Lifted booleans:
 //
 // NOTE: this implementation is optimized for the case when comparisons between values are mostly
-//       between one variable and one constant. Some care had to be taken to make sure that gcc 
+//       between one variable and one constant. Some care had to be taken to make sure that gcc
 //       does enough constant propagation to produce sensible code, and this appears to be somewhat
 //       fragile unfortunately.
 
@@ -105,7 +107,7 @@ public:
     bool  operator != (lbool b) const { return !(*this == b); }
     lbool operator ^  (bool  b) const { return lbool((uint8_t)(value^(uint8_t)b)); }
 
-    lbool operator && (lbool b) const { 
+    lbool operator && (lbool b) const {
         uint8_t sel = (this->value << 1) | (b.value << 3);
         uint8_t v   = (0xF7F755F4 >> sel) & 3;
         return lbool(v); }
@@ -136,28 +138,34 @@ inline lbool toLbool(int   v) { return lbool((uint8_t)v);  }
 // Clause -- a simple class for representing a clause:
 
 class Clause;
+class SymGenerator;
+
 typedef RegionAllocator<uint32_t>::Ref CRef;
 
 class Clause {
+    std::set<SymGenerator*>* perms;
     struct {
         unsigned mark      : 2;
         unsigned learnt    : 1;
+        unsigned symmetry  : 1;
         unsigned has_extra : 1;
         unsigned reloced   : 1;
-        unsigned size      : 27; }                        header;
+        unsigned size      : 26; }                        header;
     union { Lit lit; float act; uint32_t abs; CRef rel; } data[0];
 
     friend class ClauseAllocator;
 
     // NOTE: This constructor cannot be used directly (doesn't allocate enough memory).
-    Clause(const vec<Lit>& ps, bool use_extra, bool learnt) {
+    Clause(const vec<Lit>& ps, bool use_extra, bool learnt, bool symmetry, std::set<SymGenerator*>* p) {
+        perms = p;
         header.mark      = 0;
         header.learnt    = learnt;
+        header.symmetry  = symmetry;
         header.has_extra = use_extra;
         header.reloced   = 0;
         header.size      = ps.size();
 
-        for (int i = 0; i < ps.size(); i++) 
+        for (int i = 0; i < ps.size(); i++)
             data[i].lit = ps[i];
 
         if (header.has_extra){
@@ -177,9 +185,9 @@ class Clause {
             data[i].lit = from[i];
 
         if (header.has_extra){
-            if (header.learnt)
+            if (header.learnt) {
                 data[header.size].act = from.data[header.size].act;
-            else 
+            } else
                 data[header.size].abs = from.data[header.size].abs;
     }
     }
@@ -192,11 +200,15 @@ public:
             abstraction |= 1 << (var(data[i].lit) & 31);
         data[header.size].abs = abstraction;  }
 
+    std::set<SymGenerator*>* scompat() const { return perms; }
+    void scompat(std::set<SymGenerator*>* v) { perms = v; }
 
     int          size        ()      const   { return header.size; }
     void         shrink      (int i)         { assert(i <= size()); if (header.has_extra) data[header.size-i] = data[header.size]; header.size -= i; }
     void         pop         ()              { shrink(1); }
     bool         learnt      ()      const   { return header.learnt; }
+    bool         symmetry    ()      const   { return header.symmetry; }
+    void         symmetry    (uint32_t s)    { header.symmetry = s; }
     bool         has_extra   ()      const   { return header.has_extra; }
     uint32_t     mark        ()      const   { return header.mark; }
     void         mark        (uint32_t m)    { header.mark = m; }
@@ -244,13 +256,13 @@ class ClauseAllocator
         to.extra_clause_field = extra_clause_field;
         ra.moveTo(to.ra); }
 
-    CRef alloc(const vec<Lit>& ps, bool learnt = false)
+    CRef alloc(const vec<Lit>& ps, bool learnt = false, bool symmetry = false, std::set<SymGenerator*>*p = nullptr)
     {
         assert(sizeof(Lit)      == sizeof(uint32_t));
         assert(sizeof(float)    == sizeof(uint32_t));
         bool use_extra = learnt | extra_clause_field;
         CRef cid       = ra.alloc(clauseWord32Size(ps.size(), use_extra));
-        new (lea(cid)) Clause(ps, use_extra, learnt);
+        new (lea(cid)) Clause(ps, use_extra, learnt, symmetry, p);
 
         return cid;
     }
@@ -281,11 +293,22 @@ class ClauseAllocator
     void reloc(CRef& cr, ClauseAllocator& to)
     {
         Clause& c = operator[](cr);
-        
+        bool old = c.symmetry();
+        std::set<SymGenerator*>* valid = c.scompat();
+
+
         if (c.reloced()) { cr = c.relocation(); return; }
-        
+
         cr = to.alloc(c);
+        to[cr].symmetry(old);
+        to[cr].scompat(valid);
+
+
         c.relocate(cr);
+        if (c.symmetry())
+            assert(c.scompat() != nullptr);
+
+
     }
 };
 
@@ -333,10 +356,10 @@ class OccLists
 
  public:
     OccLists(const Deleted& d, MkIndex _index = MkIndex()) :
-        occs(_index), 
-        dirty(_index), 
+        occs(_index),
+        dirty(_index),
         deleted(d){}
-    
+
     void  init      (const K& idx){ occs.reserve(idx); occs[idx].clear(); dirty.reserve(idx, 0); }
     Vec&  operator[](const K& idx){ return occs[idx]; }
     Vec&  lookup    (const K& idx){ if (dirty[idx]) clean(idx); return occs[idx]; }
@@ -394,13 +417,13 @@ class CMap
 
     typedef Map<CRef, T, CRefHash> HashTable;
     HashTable map;
-        
+
  public:
     // Size-operations:
     void     clear       ()                           { map.clear(); }
     int      size        ()                const      { return map.elems(); }
 
-    
+
     // Insert/Remove/Test mapping:
     void     insert      (CRef cr, const T& t){ map.insert(cr, t); }
     void     growTo      (CRef cr, const T& t){ map.insert(cr, t); } // NOTE: for compatibility
@@ -427,11 +450,11 @@ class CMap
 /*_________________________________________________________________________________________________
 |
 |  subsumes : (other : const Clause&)  ->  Lit
-|  
+|
 |  Description:
 |       Checks if clause subsumes 'other', and at the same time, if it can be used to simplify 'other'
 |       by subsumption resolution.
-|  
+|
 |    Result:
 |       lit_Error  - No subsumption or simplification
 |       lit_Undef  - Clause subsumes 'other'
@@ -527,7 +550,7 @@ public:
 		printf("\n");
 	}
 
-	inline Lit getImage(Lit l){
+	inline Lit getImage(Lit l) const {
 		int index = var(l)-offset;
 		if(index<0 || index>=image.size()){
 			return l;
@@ -535,7 +558,7 @@ public:
 		return image[index]^sign(l);
 	}
 
-	inline bool permutes(Lit l){
+	inline bool permutes(Lit l) const {
 		int index = var(l)-offset;
 		return (index>=0 && index<image.size() && (image[index]^sign(l))!=l);
 	}
@@ -547,6 +570,23 @@ public:
 			out_clause[i]=getImage(in_clause[i]);
 		}
 	}
+
+    bool stabilize(const vec<Lit>& clause) const {
+        for (int i=0; i<clause.size(); i++) {
+            if (!permutes(clause[i]))
+                continue;
+
+            Lit img = getImage(clause[i]);
+            int j;
+            for (j=0; j<clause.size(); j++)
+                if (clause[j] == img)
+                    break;
+            if (j == clause.size())
+                return false;
+        }
+        return true;
+    }
+
 };
 }
 

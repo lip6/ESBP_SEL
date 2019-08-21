@@ -21,6 +21,10 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 #ifndef Minisat_Solver_h
 #define Minisat_Solver_h
 
+#include <memory>
+#include <set>
+#include <string>
+
 #include "minisat/mtl/Vec.h"
 #include "minisat/mtl/Heap.h"
 #include "minisat/mtl/Alg.h"
@@ -29,11 +33,33 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 #include "minisat/core/SolverTypes.h"
 #include <utility>
 
+#include "cosy/SymmetryController.h"
 
 namespace Minisat {
 
 //=================================================================================================
 // Solver -- the main class:
+
+
+
+template <class T>
+void make_intersection_inplace(std::set<T> *a, std::set<T> *b) {
+    typename std::set<T>::iterator it1 = a->begin();
+    typename std::set<T>::iterator it2 = b->begin();
+
+    while ( (it1 != a->end()) && (it2 != b->end()) ) {
+        if (*it1 < *it2) {
+            a->erase(it1++);
+        } else if (*it2 < *it1) {
+            ++it2;
+        } else { // *it1 == *it2
+            ++it1;
+            ++it2;
+        }
+    }
+    a->erase(it1, a->end());
+}
+
 
 class Solver {
 public:
@@ -48,12 +74,12 @@ public:
     Var     newVar    (lbool upol = l_Undef, bool dvar = true); // Add a new variable with parameters specifying variable mode.
     void    releaseVar(Lit l);                                  // Make literal true and promise to never refer to variable again.
 
-    bool    addClause (const vec<Lit>& ps);                     // Add a clause to the solver. 
+    bool    addClause (const vec<Lit>& ps);                     // Add a clause to the solver.
     bool    addEmptyClause();                                   // Add the empty clause, making the solver contradictory.
-    bool    addClause (Lit p);                                  // Add a unit clause to the solver. 
-    bool    addClause (Lit p, Lit q);                           // Add a binary clause to the solver. 
-    bool    addClause (Lit p, Lit q, Lit r);                    // Add a ternary clause to the solver. 
-    bool    addClause (Lit p, Lit q, Lit r, Lit s);             // Add a quaternary clause to the solver. 
+    bool    addClause (Lit p);                                  // Add a unit clause to the solver.
+    bool    addClause (Lit p, Lit q);                           // Add a binary clause to the solver.
+    bool    addClause (Lit p, Lit q, Lit r);                    // Add a ternary clause to the solver.
+    bool    addClause (Lit p, Lit q, Lit r, Lit s);             // Add a quaternary clause to the solver.
     bool    addClause_(      vec<Lit>& ps);                     // Add a clause to the solver without making superflous internal copy. Will
                                                                 // change the passed vector 'ps'.
 
@@ -80,14 +106,25 @@ public:
     void    toDimacs     (const char *file, const vec<Lit>& assumps);
     void    toDimacs     (FILE* f, Clause& c, vec<Var>& map, Var& max);
 
+    // Symmetry
+    std::unique_ptr<cosy::SymmetryController<Lit>> symmetry;
+    std::unique_ptr<cosy::LiteralAdapter<Minisat::Lit>> adapter;
+    CRef learntSymmetryClause(cosy::ClauseInjector::Type type, Lit p);
+    void notifyCNFUnits();
+
+    // Debug
+    void printClause(const Clause& clause) const;
+    void printClause(const vec<Lit>& clause) const;
+
+
     // Convenience versions of 'toDimacs()':
     void    toDimacs     (const char* file);
     void    toDimacs     (const char* file, Lit p);
     void    toDimacs     (const char* file, Lit p, Lit q);
     void    toDimacs     (const char* file, Lit p, Lit q, Lit r);
-    
+
     // Variable mode:
-    // 
+    //
     void    setPolarity    (Var v, lbool b); // Declare which polarity the decision heuristic should use for a variable. Requires mode 'polarity_user'.
     void    setDecisionVar (Var v, bool b);  // Declare if a variable should be eligible for selection in the decision heuristic.
 
@@ -246,7 +283,7 @@ protected:
     bool     enqueue          (Lit p, CRef from = CRef_Undef);                         // Test if fact 'p' contradicts current state, enqueue otherwise.
     CRef     propagate        ();                                                      // Perform unit propagation. Returns possibly conflicting clause.
     void     cancelUntil      (int level);                                             // Backtrack until a certain level.
-    void     analyze          (CRef confl, vec<Lit>& out_learnt, int& out_btlevel);    // (bt = backtrack)
+    void     analyze          (CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool &outSym, std::set<SymGenerator*>* comp);    // (bt = backtrack)
     void     analyzeFinal     (Lit p, LSet& out_conflict);                             // COULD THIS BE IMPLEMENTED BY THE ORDINARIY "analyze" BY SOME REASONABLE GENERALIZATION?
     bool     litRedundant     (Lit p);                                                 // (helper method for 'analyze()')
     lbool    search           (int nof_conflicts);                                     // Search for a given number of conflicts.
@@ -313,7 +350,7 @@ private:
 
 	void minimizeClause(vec<Lit>& c); // minimize clause through self-subsumption
 	void prepareWatches(vec<Lit>& c); // prepares watches of a (new) clause
-	CRef addClauseFromSymmetry(vec<Lit>& symmetrical); // @pre: clause is unit or conflicting. Bool return value is true if the symmetrical clause is unit or conflicting. CRef return value is the conflicting clause, or CRef_Undef if the symmetrical clause is not conflicting.
+    CRef addClauseFromSymmetry(const Clause& original, vec<Lit>& symmetrical); // @pre: clause is unit or conflicting. Bool return value is true if the symmetrical clause is unit or conflicting. CRef return value is the conflicting clause, or CRef_Undef if the symmetrical clause is not conflicting.
 
 	// returns 0: conflict clause: added to learned clause store
 	// returns 1: unit clause:     added to learned clause store
@@ -413,8 +450,8 @@ inline int      Solver::nVars         ()      const   { return next_var; }
 // TODO: nFreeVars() is not quite correct, try to calculate right instead of adapting it like below:
 inline int      Solver::nFreeVars     ()      const   { return (int)dec_vars - (trail_lim.size() == 0 ? trail.size() : trail_lim[0]); }
 inline void     Solver::setPolarity   (Var v, lbool b){ user_pol[v] = b; }
-inline void     Solver::setDecisionVar(Var v, bool b) 
-{ 
+inline void     Solver::setDecisionVar(Var v, bool b)
+{
     if      ( b && !decision[v]) dec_vars++;
     else if (!b &&  decision[v]) dec_vars--;
 
@@ -445,7 +482,7 @@ inline bool     Solver::okay          ()      const   { return ok; }
 inline ClauseIterator Solver::clausesBegin() const { return ClauseIterator(ca, &clauses[0]); }
 inline ClauseIterator Solver::clausesEnd  () const { return ClauseIterator(ca, &clauses[clauses.size()]); }
 inline TrailIterator  Solver::trailBegin  () const { return TrailIterator(&trail[0]); }
-inline TrailIterator  Solver::trailEnd    () const { 
+inline TrailIterator  Solver::trailEnd    () const {
     return TrailIterator(&trail[decisionLevel() == 0 ? trail.size() : trail_lim[0]]); }
 
 inline void     Solver::toDimacs     (const char* file){ vec<Lit> as; toDimacs(file, as); }

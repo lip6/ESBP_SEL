@@ -37,7 +37,7 @@ static DoubleOption  opt_var_decay         (_cat, "var-decay",   "The variable a
 static DoubleOption  opt_clause_decay      (_cat, "cla-decay",   "The clause activity decay factor",              0.999,    DoubleRange(0, false, 1, false));
 static DoubleOption  opt_random_var_freq   (_cat, "rnd-freq",    "The frequency with which the decision heuristic tries to choose a random variable", 0, DoubleRange(0, true, 1, true));
 static DoubleOption  opt_random_seed       (_cat, "rnd-seed",    "Used by the random variable selection",         91648253, DoubleRange(0, false, HUGE_VAL, false));
-static IntOption     opt_ccmin_mode        (_cat, "ccmin-mode",  "Controls conflict clause minimization (0=none, 1=basic, 2=deep)", 2, IntRange(0, 2));
+static IntOption     opt_ccmin_mode        (_cat, "ccmin-mode",  "Controls conflict clause minimization (0=none, 1=basic, 2=deep)", 0, IntRange(0, 2));
 static IntOption     opt_phase_saving      (_cat, "phase-saving", "Controls the level of phase saving (0=none, 1=limited, 2=full)", 2, IntRange(0, 2));
 static BoolOption    opt_rnd_init_act      (_cat, "rnd-init",    "Randomize the initial activity", false);
 static BoolOption    opt_luby_restart      (_cat, "luby",        "Use the Luby restart sequence", true);
@@ -46,7 +46,7 @@ static DoubleOption  opt_restart_inc       (_cat, "rinc",        "Restart interv
 static DoubleOption  opt_garbage_frac      (_cat, "gc-frac",     "The fraction of wasted memory allowed before a garbage collection is triggered",  0.20, DoubleRange(0, false, HUGE_VAL, false));
 static IntOption     opt_min_learnts_lim   (_cat, "min-learnts", "Minimum learnt clause limit",  0, IntRange(0, INT32_MAX));
 
-
+static BoolOption    opt_stop_prop      ("SYM", "stop-prop",    "Stop propagate if ESBP was found", false);
 //=================================================================================================
 // Constructor/Destructor:
 
@@ -55,7 +55,9 @@ Solver::Solver() :
 
     // Parameters (user settable):
     //
-    verbosity        (0)
+    symmetry(nullptr)
+  , adapter(nullptr)
+  , verbosity        (0)
   , var_decay        (opt_var_decay)
   , clause_decay     (opt_clause_decay)
   , random_var_freq  (opt_random_var_freq)
@@ -191,7 +193,7 @@ bool Solver::addClause_(vec<Lit>& ps)
         uncheckedEnqueue(ps[0]);
         return ok = (propagate() == CRef_Undef);
     }else{
-        CRef cr = ca.alloc(ps, false);
+        CRef cr = ca.alloc(ps, false, false, nullptr);
         clauses.push(cr);
         attachClause(cr);
     }
@@ -213,7 +215,7 @@ void Solver::attachClause(CRef cr){
 void Solver::detachClause(CRef cr, bool strict){
     const Clause& c = ca[cr];
     assert(c.size() > 1);
-    
+
     // Strict or lazy detaching:
     if (strict){
         remove(watches[~c[0]], Watcher(cr, c[1]));
@@ -233,7 +235,7 @@ void Solver::removeClause(CRef cr) {
     detachClause(cr);
     // Don't leave pointers to free'd memory!
     if (locked(c)) vardata[var(c[0])].reason = CRef_Undef;
-    c.mark(1); 
+    c.mark(1);
     ca.free(cr);
 }
 
@@ -252,7 +254,9 @@ void Solver::cancelUntil(int lvl) {
         for (int c = trail.size()-1; c >= trail_lim[lvl]; c--){
             Var      x  = var(trail[c]);
             assigns [x] = l_Undef;
-            if (phase_saving > 1 || (phase_saving == 1 && c > trail_lim.last()))
+	    if (symmetry != nullptr)
+                symmetry->updateCancel(trail[c]);
+            if (phase_saving > 1 || (phase_saving == 1) && c > trail_lim.last())
                 polarity[x] = sign(trail[c]);
             insertVarOrder(x); }
         qhead = trail_lim[lvl];
@@ -317,24 +321,29 @@ Lit Solver::pickBranchLit()
 /*_________________________________________________________________________________________________
 |
 |  analyze : (confl : Clause*) (out_learnt : vec<Lit>&) (out_btlevel : int&)  ->  [void]
-|  
+|
 |  Description:
 |    Analyze conflict and produce a reason clause.
-|  
+|
 |    Pre-conditions:
 |      * 'out_learnt' is assumed to be cleared.
 |      * Current decision level must be greater than root level.
-|  
+|
 |    Post-conditions:
 |      * 'out_learnt[0]' is the asserting literal at level 'out_btlevel'.
-|      * If out_learnt.size() > 1 then 'out_learnt[1]' has the greatest decision level of the 
+|      * If out_learnt.size() > 1 then 'out_learnt[1]' has the greatest decision level of the
 |        rest of literals. There may be others from the same level though.
-|  
+|
 |________________________________________________________________________________________________@*/
-void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel)
+void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool &outSym, std::set<SymGenerator*>* comp)
 {
     int pathC = 0;
     Lit p     = lit_Undef;
+
+    std::vector<std::set<SymGenerator*>*> symmetries;
+    std::set<Lit> units;
+
+    outSym = false;
 
     // Generate conflict clause:
     //
@@ -348,8 +357,17 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel)
         if (c.learnt())
             claBumpActivity(c);
 
+        if (c.symmetry()) {
+            outSym = true;
+            assert(ca[confl].scompat() != nullptr);
+            symmetries.push_back(ca[confl].scompat());
+        }
+
         for (int j = (p == lit_Undef) ? 0 : 1; j < c.size(); j++){
             Lit q = c[j];
+
+            if (level(var(q)) == 0)
+                units.insert(q);
 
             if (!seen[var(q)] && level(var(q)) > 0){
                 varBumpActivity(var(q));
@@ -360,7 +378,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel)
                     out_learnt.push(q);
             }
         }
-        
+
         // Select next clause to look at:
         while (!seen[var(trail[index--])]);
         p     = trail[index+1];
@@ -379,7 +397,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel)
         for (i = j = 1; i < out_learnt.size(); i++)
             if (reason(var(out_learnt[i])) == CRef_Undef || !litRedundant(out_learnt[i]))
                 out_learnt[j++] = out_learnt[i];
-        
+
     }else if (ccmin_mode == 1){
         for (i = j = 1; i < out_learnt.size(); i++){
             Var x = var(out_learnt[i]);
@@ -419,6 +437,67 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel)
     }
 
     for (int j = 0; j < analyze_toclear.size(); j++) seen[var(analyze_toclear[j])] = 0;    // ('seen[]' is now cleared)
+
+     if (!outSym)
+        return;
+
+    comp->clear();
+    for (std::set<SymGenerator*>* check : symmetries) {
+        if (check->empty()) {
+            comp->clear();
+            break;
+        }
+
+        if (comp->empty()) {
+            comp->insert(check->begin(), check->end());
+            continue;
+        }
+
+        // make intersection with c in place on comp
+        std::set<SymGenerator*>::iterator it1 = comp->begin();
+        std::set<SymGenerator*>::iterator it2 = check->begin();
+        while ( (it1 != comp->end()) && (it2 != check->end()) ) {
+            if (*it1 < *it2) {
+                comp->erase(it1++);
+            } else if (*it2 < *it1) {
+                ++it2;
+            } else { // *it1 == *it2
+                ++it1;
+                ++it2;
+            }
+        }
+        comp->erase(it1, comp->end());
+        if (comp->empty())
+            break;
+    }
+
+    std::set<SymGenerator*> to_remove;
+    for (Lit l : units) {
+        assert(level(var(l)) == 0);
+        for (SymGenerator *g : *comp) {
+            Lit image = g->getImage(l);
+            /* if (value(image) != value(l) || level(var(image)) != 0)
+               to_remove.insert(g);*/
+            if (image != l)
+                to_remove.insert(g);
+        }
+    }
+    for (SymGenerator *g : to_remove) {
+        comp->erase(g);
+    }
+
+    // Add stabilizer
+    for (int i=0; i<generators.size(); i++) {
+        SymGenerator *g = generators[i];
+        if(comp->find(g) != comp->end())
+            continue;
+
+        if (g->stabilize(out_learnt))
+            comp->insert(g);
+    }
+
+
+
 }
 
 
@@ -437,11 +516,11 @@ bool Solver::litRedundant(Lit p)
         if (i < (uint32_t)c->size()){
             // Checking 'p'-parents 'l':
             Lit l = (*c)[i];
-            
+
             // Variable at level 0 or previously removable:
             if (level(var(l)) == 0 || seen[var(l)] == seen_source || seen[var(l)] == seen_removable){
                 continue; }
-            
+
             // Check variable can not be removed for some local reason:
             if (reason(var(l)) == CRef_Undef || seen[var(l)] == seen_failed){
                 stack.push(ShrinkStackElem(0, p));
@@ -450,7 +529,7 @@ bool Solver::litRedundant(Lit p)
                         seen[var(stack[i].l)] = seen_failed;
                         analyze_toclear.push(stack[i].l);
                     }
-                    
+
                 return false;
             }
 
@@ -468,7 +547,7 @@ bool Solver::litRedundant(Lit p)
 
             // Terminate with success if stack is empty:
             if (stack.size() == 0) break;
-            
+
             // Continue with top element on stack:
             i  = stack.last().i;
             p  = stack.last().l;
@@ -485,7 +564,7 @@ bool Solver::litRedundant(Lit p)
 /*_________________________________________________________________________________________________
 |
 |  analyzeFinal : (p : Lit)  ->  [void]
-|  
+|
 |  Description:
 |    Specialized analysis procedure to express the final conflict in terms of assumptions.
 |    Calculates the (possibly empty) set of assumptions that led to the assignment of 'p', and
@@ -533,11 +612,11 @@ void Solver::uncheckedEnqueue(Lit p, CRef from)
 /*_________________________________________________________________________________________________
 |
 |  propagate : [void]  ->  [Clause*]
-|  
+|
 |  Description:
 |    Propagates all enqueued facts. If a conflict arises, the conflicting clause is returned,
 |    otherwise CRef_Undef.
-|  
+|
 |    Post-conditions:
 |      * the propagation queue is empty, even if there was a conflict.
 |________________________________________________________________________________________________@*/
@@ -552,6 +631,12 @@ StartPropagate:
         Watcher        *i, *j, *end;
         num_props++;
 
+	if (symmetry) {
+		symmetry->updateNotify(p);
+	        CRef cr = learntSymmetryClause(cosy::ClauseInjector::ESBP, p);
+                if (opt_stop_prop && cr != CRef_Undef)
+                    return cr;
+	}
         for (i = j = (Watcher*)ws, end = i + ws.size();  i != end;){
             // Try to avoid inspecting the clause:
             Lit blocker = i->blocker;
@@ -648,7 +733,12 @@ StartPropagate:
 				assert(value(selClauses[watch])==l_False);
 
 				// create new learned clause
-				selGen[currentclause]->getSymmetricalClause(ca[reason(selProp[currentclause])],symmetrical);
+                                const Clause& original = ca[reason(selProp[currentclause])];
+
+                                if (original.symmetry() && original.scompat()->find(selGen[currentclause]) == original.scompat()->end())
+                                    continue;
+
+				selGen[currentclause]->getSymmetricalClause(original, symmetrical);
 				minimizeClause(symmetrical);
 				if(symmetrical.size()<2){
 					assert(symmetrical.size()==1);
@@ -667,7 +757,7 @@ StartPropagate:
 				prepareWatches(symmetrical);
 
 				assert(value(symmetrical[1])==l_False);
-				confl = addClauseFromSymmetry(symmetrical);
+				confl = addClauseFromSymmetry(original, symmetrical);
 				if(confl==CRef_Undef){ // unit clause
 					++symselprops;
 					goto StartPropagate; // TODO: fix useless iteration over previous watches (i)
@@ -688,19 +778,7 @@ StartPropagate:
 			int watchEnd = genWatchIndices[var(currentGenLit)+1];
 
 			if(level(var(currentGenLit))==0){ // NOTE: special purpose level 0 method needed as not all level 0 propagations have a reason clause attached to it
-				assert(decisionLevel()==0);
-				for(int i=watchStart; i<watchEnd; ++i){
-					Lit symlit=genWatches[i]->getImage(currentGenLit);
-					if(value(symlit)==l_Undef){ // unit clause
-						++symgenprops;
-						uncheckedEnqueue(symlit);
-						goto StartPropagate;
-					} else if (value(symlit)==l_False){ // conflict clause
-						++symgenconfls;
-						confl = CRef_Unsat;
-						goto ConflDetected;
-					}
-				}
+                            continue;
 			}
 
 			CRef reason_cgl = reason(var(currentGenLit));
@@ -711,6 +789,11 @@ StartPropagate:
 			for(; watchidx<watchEnd-watchStart; ++watchidx){
 				SymGenerator* g = genWatches[watchStart+watchidx];
 				assert(g->permutes(currentGenLit));
+
+
+
+                                if (ca[reason_cgl].symmetry() && ca[reason_cgl].scompat()->find(g) == ca[reason_cgl].scompat()->end())
+                                    continue;
 				int result = addSelClause(g, currentGenLit);
 				if(result<2){ // either conflict or unit clause
 					g->getSymmetricalClause(ca[reason_cgl],symmetrical);
@@ -731,7 +814,7 @@ StartPropagate:
 					assert(symmetrical.size()>1);
 					prepareWatches(symmetrical);
 					assert(value(symmetrical[1])==l_False);
-					confl = addClauseFromSymmetry(symmetrical);
+					confl = addClauseFromSymmetry(ca[reason_cgl], symmetrical);
 
 					assert(result==0 | confl==CRef_Undef); // propagating result should lead to undef clause
 					// NOTE: it is possible that (confl==CRef_Undef) & (result==0), if the symmetrical clause was a unit clause at some level, but has been made conflicting at a higher level. We treat this as a unit clause
@@ -760,16 +843,16 @@ ConflDetected:
 /*_________________________________________________________________________________________________
 |
 |  reduceDB : ()  ->  [void]
-|  
+|
 |  Description:
 |    Remove half of the learnt clauses, minus the clauses locked by the current assignment. Locked
 |    clauses are clauses that are reason to some assignment. Binary clauses are never removed.
 |________________________________________________________________________________________________@*/
-struct reduceDB_lt { 
+struct reduceDB_lt {
     ClauseAllocator& ca;
     reduceDB_lt(ClauseAllocator& ca_) : ca(ca_) {}
-    bool operator () (CRef x, CRef y) { 
-        return ca[x].size() > 2 && (ca[y].size() == 2 || ca[x].activity() < ca[y].activity()); } 
+    bool operator () (CRef x, CRef y) {
+        return ca[x].size() > 2 && (ca[y].size() == 2 || ca[x].activity() < ca[y].activity()); }
 };
 void Solver::reduceDB()
 {
@@ -826,7 +909,7 @@ void Solver::rebuildOrderHeap()
 /*_________________________________________________________________________________________________
 |
 |  simplify : [void]  ->  [bool]
-|  
+|
 |  Description:
 |    Simplify the clause database according to the current top-level assigment. Currently, the only
 |    thing done here is the removal of satisfied clauses, but more things can be put here.
@@ -882,11 +965,11 @@ bool Solver::simplify()
 /*_________________________________________________________________________________________________
 |
 |  search : (nof_conflicts : int) (params : const SearchParams&)  ->  [lbool]
-|  
+|
 |  Description:
-|    Search for a model the specified number of conflicts. 
+|    Search for a model the specified number of conflicts.
 |    NOTE! Use negative value for 'nof_conflicts' indicate infinity.
-|  
+|
 |  Output:
 |    'l_True' if a partial assigment that is consistent with respect to the clauseset is found. If
 |    all variables are decision variables, this means that the clause set is satisfiable. 'l_False'
@@ -899,6 +982,7 @@ lbool Solver::search(int nof_conflicts)
     int         conflictC = 0;
     vec<Lit>    learnt_clause;
     starts++;
+    bool isSym = false;
 
     for (;;){
         CRef confl = propagate();
@@ -908,13 +992,47 @@ lbool Solver::search(int nof_conflicts)
             if (decisionLevel() == 0) return l_False;
 
             learnt_clause.clear();
-            analyze(confl, learnt_clause, backtrack_level);
+            std::set<SymGenerator*> comp;
+            analyze(confl, learnt_clause, backtrack_level, isSym, &comp);
             cancelUntil(backtrack_level);
 
             if (learnt_clause.size() == 1){
                 uncheckedEnqueue(learnt_clause[0]);
+                Lit l = learnt_clause[0];
+                if (isSym) {
+                    for (SymGenerator* g : comp) {
+                        // TODO ADD WHOLE ORBITS
+                        if (g->permutes(l)) {
+                            Lit image = g->getImage(l);
+                            if (value(image) == l_Undef)
+                                ;
+                                // uncheckedEnqueue(image);
+                            // else if (value(image) == l_False) {
+                            //  std::cout << "UNSAT HERE" << std::endl;
+                            //  return l_False;
+                            //}
+                        }
+                    }
+                } else {
+                    for (int i=0; i<generators.size(); i++) {
+                        SymGenerator * g = generators[i];
+                        // TODO ADD WHOLE ORBITS
+                        if (g->permutes(l)) {
+                            Lit image = g->getImage(l);
+                            if (value(image) == l_Undef)
+                                ;
+                                // uncheckedEnqueue(image);
+                            // else if (value(image) == l_False)
+                                //return l_False;
+                        }
+                    }
+                }
             }else{
-                CRef cr = ca.alloc(learnt_clause, true);
+                std::set<SymGenerator*>* valid = isSym ? new std::set<SymGenerator*>(comp.begin(), comp.end()) : nullptr;
+                if (isSym)
+                    assert(valid != nullptr);
+
+                CRef cr = ca.alloc(learnt_clause, true, isSym, valid);
                 learnts.push(cr);
                 attachClause(cr);
                 claBumpActivity(ca[cr]);
@@ -931,8 +1049,8 @@ lbool Solver::search(int nof_conflicts)
 
                 if (verbosity >= 1)
                     printf("| %9d | %7d %8d %8d | %8d %8d %6.0f | %6.3f %% |\n",
-                           (int)conflicts, 
-                           (int)dec_vars - (trail_lim.size() == 0 ? trail.size() : trail_lim[0]), nClauses(), (int)clauses_literals, 
+                           (int)conflicts,
+                           (int)dec_vars - (trail_lim.size() == 0 ? trail.size() : trail_lim[0]), nClauses(), (int)clauses_literals,
                            (int)max_learnts, nLearnts(), (double)learnts_literals/nLearnts(), progressEstimate()*100);
             }
 
@@ -1053,11 +1171,32 @@ lbool Solver::solve_()
 		}
 
     solves++;
+ // Set symmetry order
+    if (symmetry != nullptr) {
+        symmetry->enableCosy(cosy::OrderMode::AUTO,
+                             cosy::ValueMode::TRUE_LESS_FALSE
+                             // FALSE_LESS_TRUE
+                             );
+        symmetry->printInfo();
 
+        notifyCNFUnits();
+
+        cosy::ClauseInjector::Type type = cosy::ClauseInjector::UNITS;
+	while (symmetry->hasClauseToInject(type)) {
+
+            std::vector<Lit> literals = symmetry->clauseToInject(type);
+            assert(literals.size() == 1);
+            Lit l = literals[0];
+            if (value(l) == l_Undef)
+                uncheckedEnqueue(l);
+	}
+    }
     max_learnts = nClauses() * learntsize_factor;
     if (max_learnts < min_learnts_lim)
         max_learnts = min_learnts_lim;
+    solves++;
 
+    max_learnts               = nClauses() * learntsize_factor;
     learntsize_adjust_confl   = learntsize_adjust_start_confl;
     learntsize_adjust_cnt     = (int)learntsize_adjust_confl;
     lbool   status            = l_Undef;
@@ -1115,14 +1254,14 @@ bool Solver::implies(const vec<Lit>& assumps, vec<Lit>& out)
             out.push(trail[j]);
     }else
         ret = false;
-    
+
     cancelUntil(0);
     return ret;
 }
 
 //=================================================================================================
 // Writing CNF to DIMACS:
-// 
+//
 // FIXME: this needs to be rewritten completely.
 
 static Var mapVar(Var x, vec<Var>& map, Var& max)
@@ -1171,7 +1310,7 @@ void Solver::toDimacs(FILE* f, const vec<Lit>& assumps)
     for (int i = 0; i < clauses.size(); i++)
         if (!satisfied(ca[clauses[i]]))
             cnt++;
-        
+
     for (int i = 0; i < clauses.size(); i++)
         if (!satisfied(ca[clauses[i]])){
             Clause& c = ca[clauses[i]];
@@ -1213,6 +1352,8 @@ void Solver::printStats() const
     printf("conflict literals     : %-12"PRIu64"   (%4.2f %% deleted)\n", tot_literals, (max_literals - tot_literals)*100 / (double)max_literals);
     if (mem_used != 0) printf("Memory used           : %.2f MB\n", mem_used);
     printf("CPU time              : %g s\n", cpu_time);
+    if (symmetry)
+        symmetry->printStats();
 }
 
 
@@ -1270,11 +1411,11 @@ void Solver::garbageCollect()
 {
     // Initialize the next region to a size corresponding to the estimated utilization degree. This
     // is not precise but should avoid some unnecessary reallocations for the new region:
-    ClauseAllocator to(ca.size() - ca.wasted()); 
+    ClauseAllocator to(ca.size() - ca.wasted());
 
     relocAll(to);
     if (verbosity >= 2)
-        printf("|  Garbage collection:   %12d bytes => %12d bytes             |\n", 
+        printf("|  Garbage collection:   %12d bytes => %12d bytes             |\n",
                ca.size()*ClauseAllocator::Unit_Size, to.size()*ClauseAllocator::Unit_Size);
     to.moveTo(ca);
 }
@@ -1319,6 +1460,7 @@ void Solver::prepareWatches(vec<Lit>& c){
 // minimize clause through self-subsumption
 // NOTE: some clauses at level 0 have no unit clause as reason, so ugly code ahead
 void Solver::minimizeClause(vec<Lit>& cl){
+    return; // debug
 	vec<int> minimizeTmpVec;
 	minimizeTmpVec.growTo(cl.size());
 	for(int i=0; i<cl.size(); ++i){
@@ -1356,10 +1498,10 @@ void Solver::minimizeClause(vec<Lit>& cl){
 }
 
 // NOTE: sometimes backtracks to add unit clause instead of conflict clause
-CRef Solver::addClauseFromSymmetry(vec<Lit>& symmetrical){
+CRef Solver::addClauseFromSymmetry(const Clause& original, vec<Lit>& symmetrical){
 	assert(symmetrical.size()>0);
 
-	CRef cr = ca.alloc(symmetrical, true);
+	CRef cr = ca.alloc(symmetrical, true, original.symmetry(), original.scompat()); // TODO
 	learnts.push(cr);
 	attachClause(cr);
 	claBumpActivity(ca[cr]);
@@ -1411,6 +1553,45 @@ int Solver::addSelClause(SymGenerator* g, Lit l){
 	return 3;
 }
 
+CRef Solver::learntSymmetryClause(cosy::ClauseInjector::Type type, Lit p) {
+    if (symmetry != nullptr) {
+        if (symmetry->hasClauseToInject(type, p)) {
+            std::vector<Lit> vsbp = symmetry->clauseToInject(type, p);
+
+            // Dirty make a copy of vector
+            vec<Lit> sbp;
+            for (Lit l : vsbp) {
+                assert(value(l) == l_False);
+                sbp.push(l);
+            }
+
+            std::set<SymGenerator*>* comp = new std::set<SymGenerator*>();
+
+            for(int i=0; i<generators.size(); ++i) {
+                SymGenerator * generator = generators[i];
+
+                if (generator->stabilize(sbp))
+                    comp->insert(generator);
+            }
+
+            CRef cr = ca.alloc(sbp, true, true, comp);
+
+            assert(ca[cr].scompat() != nullptr);
+            learnts.push(cr);
+            attachClause(cr);
+
+            return cr;
+        }
+    }
+    return CRef_Undef;
+}
+
+void Solver::notifyCNFUnits() {
+    if (symmetry != nullptr) {
+        for (int i=0; i<trail.size(); i++)
+            symmetry->updateNotify(trail[i]);
+    }
+}
 bool Solver::testSelClauses(){
 	vec<Lit> symmetrical;
 	for(int cl=0; cl<selProp.size(); ++cl){

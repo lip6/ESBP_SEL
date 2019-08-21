@@ -26,6 +26,8 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 #include "minisat/utils/Options.h"
 #include "minisat/core/Dimacs.h"
 #include "minisat/simp/SimpSolver.h"
+#include "minisat/core/MinisatLiteralAdapter.h"
+#include "cosy/SymmetryController.h"
 
 #include <string>
 
@@ -58,11 +60,11 @@ int main(int argc, char** argv)
     try {
         setUsageHelp("USAGE: %s [options] <input-file> <result-output-file>\n\n  where input may be either in plain or gzipped DIMACS.\n");
         setX86FPUPrecision();
-        
+
         // Extra options:
         //
         IntOption    verb   ("MAIN", "verb",   "Verbosity level (0=silent, 1=some, 2=more).", 1, IntRange(0, 2));
-        BoolOption   pre    ("MAIN", "pre",    "Completely turn on/off any preprocessing.", true);
+        BoolOption   pre    ("MAIN", "pre",    "Completely turn on/off any preprocessing.", false);
         BoolOption   solve  ("MAIN", "solve",  "Completely turn on/off solving after preprocessing.", true);
         StringOption dimacs ("MAIN", "dimacs", "If given, stop after preprocessing and write the result to this file.");
         IntOption    cpu_lim("MAIN", "cpu-lim","Limit on CPU time allowed in seconds.\n", 0, IntRange(0, INT32_MAX));
@@ -71,18 +73,20 @@ int main(int argc, char** argv)
         BoolOption   linear_sym_gens   ("MAIN", "linear-sym-gens", "Use a linear number of generators for row interchangeability.", false);
 
         parseOptions(argc, argv, true);
-        
+
         SimpSolver  S;
         double      initial_time = cpuTime();
 
         if (!pre) S.eliminate(true);
 
         S.verbosity = verb;
-        
+
         solver = &S;
         // Use signal handlers that forcibly quit until the solver will be able to respond to
         // interrupts:
         sigTerm(SIGINT_exit);
+
+
 
         // Try to set resource limits:
         if (cpu_lim != 0) limitTime(cpu_lim);
@@ -104,12 +108,12 @@ int main(int argc, char** argv)
 
 				if (in_sym!=NULL){
 					printf("Found .sym symmetry file.\n");
-				  parse_SYMMETRY(in_sym, S, linear_sym_gens);
+                                        parse_SYMMETRY(in_sym, S, linear_sym_gens);
 				  gzclose(in_sym);
 				}else{
 				  printf("Did not find .sym symmetry file. Assuming no symmetry is provided.\n");
 				}
-        
+
         if (S.verbosity > 0){
             printf("============================[ Problem Statistics ]=============================\n");
             printf("|                                                                             |\n"); }
@@ -120,7 +124,7 @@ int main(int argc, char** argv)
             printf("|  Number of variables:  %12d                                         |\n", S.nVars());
             printf("|  Number of clauses:    %12d                                         |\n", S.nClauses());
 	          printf("|  Number of sym generators: %8d                                         |\n", S.nGenerators()); }
-        
+
         double parsed_time = cpuTime();
         if (S.verbosity > 0)
             printf("|  Parse time:           %12.2f s                                       |\n", parsed_time - initial_time);
@@ -129,7 +133,7 @@ int main(int argc, char** argv)
         // voluntarily:
         sigTerm(SIGINT_interrupt);
 
-        S.eliminate(true);
+        //        S.eliminate(true);
         double simplified_time = cpuTime();
         if (S.verbosity > 0){
             printf("|  Simplification time:  %12.2f s                                       |\n", simplified_time - parsed_time);
@@ -144,6 +148,43 @@ int main(int argc, char** argv)
                 printf("\n"); }
             printf("UNSATISFIABLE\n");
             exit(20);
+        }
+
+        bool opt_cosy = true;
+        if (opt_cosy) {
+            S.adapter = std::unique_ptr<cosy::LiteralAdapter<Minisat::Lit>>
+                (new MinisatLiteralAdapter());
+
+            /*std::string cnf_file = std::string(argv[1]);
+
+            S.symmetry = std::unique_ptr<cosy::SymmetryController<Minisat::Lit>>
+                (new cosy::SymmetryController<Minisat::Lit>
+                 (cnf_file,
+                  cosy::SymmetryFinder::Automorphism::BLISS,
+                  S.adapter));
+            */
+
+            std::string cnf_file = std::string(argv[1]);
+            std::string sym_file_bliss = cnfloc + ".bliss";
+            std::string symloc = cnfloc + ".sym";
+
+            bool opt_bliss = false;
+            bool opt_breakid = true;
+
+            if (opt_bliss) {
+                S.symmetry = std::unique_ptr<cosy::SymmetryController<Minisat::Lit>>
+                    (new cosy::SymmetryController<Minisat::Lit>
+                     (cnf_file,
+                      sym_file_bliss, cosy::SymmetryReader::SAUCY_SYM,
+                      S.adapter));
+            } else if (opt_breakid) {
+                S.symmetry = std::unique_ptr<cosy::SymmetryController<Minisat::Lit>>
+                    (new cosy::SymmetryController<Minisat::Lit>
+                     (cnf_file, symloc, cosy::SymmetryReader::BREAKID_SYM,
+                      S.adapter));
+            } else {
+                S.symmetry = nullptr;
+            }
         }
 
         lbool ret = l_Undef;
@@ -161,17 +202,18 @@ int main(int argc, char** argv)
             S.printStats();
             printf("\n"); }
         printf(ret == l_True ? "SATISFIABLE\n" : ret == l_False ? "UNSATISFIABLE\n" : "INDETERMINATE\n");
+        res = stdout;
         if (res != NULL){
             if (ret == l_True){
-                fprintf(res, "SAT\n");
+                fprintf(res, "s SATISFIABLE\nv ");
                 for (int i = 0; i < S.nVars(); i++)
                     if (S.model[i] != l_Undef)
                         fprintf(res, "%s%s%d", (i==0)?"":" ", (S.model[i]==l_True)?"":"-", i+1);
                 fprintf(res, " 0\n");
             }else if (ret == l_False)
-                fprintf(res, "UNSAT\n");
+                fprintf(res, "s UNSATISFIABLE\n");
             else
-                fprintf(res, "INDET\n");
+                fprintf(res, "s INDETERMINATE\n");
             fclose(res);
         }
 
