@@ -109,6 +109,8 @@ public:
     // Symmetry
     std::unique_ptr<cosy::SymmetryController<Lit>> symmetry;
     std::unique_ptr<cosy::LiteralAdapter<Minisat::Lit>> adapter;
+    std::set<Lit> forbid_units;
+
     CRef learntSymmetryClause(cosy::ClauseInjector::Type type, Lit p);
     void notifyCNFUnits();
 

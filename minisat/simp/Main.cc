@@ -72,6 +72,9 @@ int main(int argc, char** argv)
         BoolOption   strictp("MAIN", "strict", "Validate DIMACS header during parsing.", false);
         BoolOption   linear_sym_gens   ("MAIN", "linear-sym-gens", "Use a linear number of generators for row interchangeability.", false);
 
+        BoolOption    opt_bliss      ("SYM", "bliss",  "Parse sym file in bliss", false);
+        BoolOption    opt_breakid    ("SYM", "breakid","PArse sym file in breakid format", false);
+
         parseOptions(argc, argv, true);
 
         SimpSolver  S;
@@ -103,16 +106,7 @@ int main(int argc, char** argv)
 				parse_DIMACS(in, S, (bool)strictp);
 				gzclose(in);
 
-				std::string symloc = cnfloc+".sym";
-				gzFile in_sym = (argc == 1) ? gzdopen(0, "rb") : gzopen(symloc.c_str(), "rb");
 
-				if (in_sym!=NULL){
-					printf("Found .sym symmetry file.\n");
-                                        parse_SYMMETRY(in_sym, S, linear_sym_gens);
-				  gzclose(in_sym);
-				}else{
-				  printf("Did not find .sym symmetry file. Assuming no symmetry is provided.\n");
-				}
 
         if (S.verbosity > 0){
             printf("============================[ Problem Statistics ]=============================\n");
@@ -151,6 +145,11 @@ int main(int argc, char** argv)
         }
 
         bool opt_cosy = true;
+
+        std::string cnf_file = std::string(argv[1]);
+        std::string sym_file_bliss = cnfloc + ".bliss";
+        std::string symloc = cnfloc + ".sym";
+
         if (opt_cosy) {
             S.adapter = std::unique_ptr<cosy::LiteralAdapter<Minisat::Lit>>
                 (new MinisatLiteralAdapter());
@@ -164,12 +163,7 @@ int main(int argc, char** argv)
                   S.adapter));
             */
 
-            std::string cnf_file = std::string(argv[1]);
-            std::string sym_file_bliss = cnfloc + ".bliss";
-            std::string symloc = cnfloc + ".sym";
 
-            bool opt_bliss = false;
-            bool opt_breakid = true;
 
             if (opt_bliss) {
                 S.symmetry = std::unique_ptr<cosy::SymmetryController<Minisat::Lit>>
@@ -185,6 +179,22 @@ int main(int argc, char** argv)
             } else {
                 S.symmetry = nullptr;
             }
+        }
+
+
+        gzFile in_sym = (argc == 1) ? gzdopen(0, "rb") : opt_breakid ? gzopen(symloc.c_str(), "rb") : gzopen(sym_file_bliss.c_str(), "rb");
+
+        if (in_sym!=NULL){
+            if (opt_breakid) {
+                parse_SYMMETRY(in_sym, S, linear_sym_gens);
+                gzclose(in_sym);
+            } else if (opt_bliss) {
+                parse_SYMMETRY_BLISS(in_sym, S);
+                gzclose(in_sym);
+            }
+
+        }else{
+            printf("c Did not find .sym symmetry file. Assuming no symmetry is provided.\n");
         }
 
         lbool ret = l_Undef;

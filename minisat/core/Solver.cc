@@ -367,8 +367,10 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool &o
         for (int j = (p == lit_Undef) ? 0 : 1; j < c.size(); j++){
             Lit q = c[j];
 
-            if (level(var(q)) == 0)
+            if (level(var(q)) == 0 && (forbid_units.find(~q) != forbid_units.end())) {
                 units.insert(q);
+                outSym = true;
+            }
 
             if (!seen[var(q)] && level(var(q)) > 0){
                 varBumpActivity(var(q));
@@ -477,10 +479,10 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool &o
         assert(level(var(l)) == 0);
         for (SymGenerator *g : *comp) {
             Lit image = g->getImage(l);
-            /* if (value(image) != value(l) || level(var(image)) != 0)
-               to_remove.insert(g);*/
-            if (image != l)
+            if (value(image) != value(l) || level(var(image)) != 0)
                 to_remove.insert(g);
+            // if (image != l)
+            //     to_remove.insert(g);
         }
     }
     for (SymGenerator *g : to_remove) {
@@ -488,17 +490,14 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool &o
     }
 
     // Add stabilizer
-    /* for (int i=0; i<generators.size(); i++) {
+    for (int i=0; i<generators.size(); i++) {
         SymGenerator *g = generators[i];
         if(comp->find(g) != comp->end())
             continue;
 
         if (g->stabilize(out_learnt))
             comp->insert(g);
-            }*/
-
-
-
+    }
 }
 
 
@@ -513,14 +512,23 @@ bool Solver::litRedundant(Lit p)
     vec<ShrinkStackElem>& stack = analyze_stack;
     stack.clear();
 
+    bool isSym = false;
+
+    if (c->symmetry())
+        isSym = true;
+
     for (uint32_t i = 1; ; i++){
         if (i < (uint32_t)c->size()){
             // Checking 'p'-parents 'l':
             Lit l = (*c)[i];
 
+            if (forbid_units.find(~l) != forbid_units.end())
+                isSym = true;
+
             // Variable at level 0 or previously removable:
             if (level(var(l)) == 0 || seen[var(l)] == seen_source || seen[var(l)] == seen_removable){
-                continue; }
+                continue;
+            }
 
             // Check variable can not be removed for some local reason:
             if (reason(var(l)) == CRef_Undef || seen[var(l)] == seen_failed){
@@ -539,6 +547,10 @@ bool Solver::litRedundant(Lit p)
             i  = 0;
             p  = l;
             c  = &ca[reason(var(p))];
+
+            if (c->symmetry())
+                isSym = true;
+
         }else{
             // Finished with current element 'p' and reason 'c':
             if (seen[var(p)] == seen_undef){
@@ -554,11 +566,14 @@ bool Solver::litRedundant(Lit p)
             p  = stack.last().l;
             c  = &ca[reason(var(p))];
 
+            if (c->symmetry())
+                isSym = true;
+
             stack.pop();
         }
     }
 
-    return true;
+    return !isSym;
 }
 
 
@@ -607,6 +622,16 @@ void Solver::uncheckedEnqueue(Lit p, CRef from)
     assigns[var(p)] = lbool(!sign(p));
     vardata[var(p)] = mkVarData(from, decisionLevel());
     trail.push_(p);
+
+    if (decisionLevel() == 0 && from != CRef_Undef) {
+        const Clause& c = ca[from];
+        for (int i=0; i<c.size(); i++) {
+            if (forbid_units.find(~c[i]) != forbid_units.end()) {
+                forbid_units.insert(p);
+                break;
+            }
+        }
+    }
 }
 
 
@@ -685,7 +710,7 @@ StartPropagate:
     }
 
 		vec<Lit> symmetrical;
-#if 0
+#if 1
 	/*** first check existing symmetrical clauses ***/
 		for(; confl == CRef_Undef && qhead_sel<trail.size(); ++qhead_sel){
 			Lit prop = trail[qhead_sel];
@@ -793,10 +818,11 @@ StartPropagate:
 				SymGenerator* g = genWatches[watchStart+watchidx];
 				assert(g->permutes(currentGenLit));
 
-
-
                                 if (ca[reason_cgl].symmetry() && ca[reason_cgl].scompat()->find(g) == ca[reason_cgl].scompat()->end())
                                     continue;
+
+                                if (!ca[reason_cgl].symmetry())
+                                    assert(ca[reason_cgl].scompat() == nullptr);
 				int result = addSelClause(g, currentGenLit);
 				if(result<2){ // either conflict or unit clause
 					g->getSymmetricalClause(ca[reason_cgl],symmetrical);
@@ -887,14 +913,14 @@ void Solver::removeSatisfied(vec<CRef>& cs)
         if (satisfied(c))
             removeClause(cs[i]);
         else{
-            // Trim clause:
-            assert(value(c[0]) == l_Undef && value(c[1]) == l_Undef);
-            for (int k = 2; k < c.size(); k++)
-                if (value(c[k]) == l_False){
-                    c[k--] = c[c.size()-1];
-                    c.pop();
-                }
-            cs[j++] = cs[i];
+            // // Trim clause:
+            // assert(value(c[0]) == l_Undef && value(c[1]) == l_Undef);
+            // for (int k = 2; k < c.size(); k++)
+            //     if (value(c[k]) == l_False){
+            //         c[k--] = c[c.size()-1];
+            //         c.pop();
+            //     }
+            // cs[j++] = cs[i];
         }
     }
     cs.shrink(i - j);
@@ -1004,18 +1030,20 @@ lbool Solver::search(int nof_conflicts)
             if (learnt_clause.size() == 1){
                 uncheckedEnqueue(learnt_clause[0]);
                 Lit l = learnt_clause[0];
+
                 if (isSym) {
+                    forbid_units.insert(l);
+
                     for (SymGenerator* g : comp) {
                         // TODO ADD WHOLE ORBITS
                         if (g->permutes(l)) {
                             Lit image = g->getImage(l);
                             if (value(image) == l_Undef)
-                                ;
-                                // uncheckedEnqueue(image);
-                            // else if (value(image) == l_False) {
-                            //  std::cout << "UNSAT HERE" << std::endl;
-                            //  return l_False;
-                            //}
+                                uncheckedEnqueue(image);
+                            else if (value(image) == l_False) {
+                             std::cout << "UNSAT HERE" << std::endl;
+                             return l_False;
+                            }
                         }
                     }
                 } else {
@@ -1025,10 +1053,9 @@ lbool Solver::search(int nof_conflicts)
                         if (g->permutes(l)) {
                             Lit image = g->getImage(l);
                             if (value(image) == l_Undef)
-                                ;
-                                // uncheckedEnqueue(image);
-                            // else if (value(image) == l_False)
-                                //return l_False;
+                                uncheckedEnqueue(image);
+                            else if (value(image) == l_False)
+                                return l_False;
                         }
                     }
                 }
@@ -1192,8 +1219,10 @@ lbool Solver::solve_()
             std::vector<Lit> literals = symmetry->clauseToInject(type);
             assert(literals.size() == 1);
             Lit l = literals[0];
+            forbid_units.insert(l);
             if (value(l) == l_Undef)
                 uncheckedEnqueue(l);
+
 	}
     }
     max_learnts = nClauses() * learntsize_factor;
@@ -1226,8 +1255,8 @@ lbool Solver::solve_()
         printf("===============================================================================\n");
 
 
-    for (int i=0; i<trail_lim[0]; i++)
-        printf("%s%d 0\n", sign(trail[i])?"-":"", var(trail[i])+1);
+    // for (int i=0; i<trail_lim[0]; i++)
+    //     printf("%s%d 0\n", sign(trail[i])?"-":"", var(trail[i])+1);
 
 
     if (status == l_True){
@@ -1469,42 +1498,106 @@ void Solver::prepareWatches(vec<Lit>& c){
 // minimize clause through self-subsumption
 // NOTE: some clauses at level 0 have no unit clause as reason, so ugly code ahead
 void Solver::minimizeClause(vec<Lit>& cl){
-    return; // debug
-	vec<int> minimizeTmpVec;
-	minimizeTmpVec.growTo(cl.size());
-	for(int i=0; i<cl.size(); ++i){
-		int vcli = var(cl[i]);
-		minimizeTmpVec[i]=vcli;
-		assert(seen[vcli]==0);
-		seen[vcli]=1; // mark as seen
-	}
-	for(int i=0; i<cl.size() && cl.size()>1; ++i){
-		if(value(cl[i])!=l_False){
-			continue;
-		}
-		if(level(var(cl[i]))==0){
-			cl.swapErase(i);
-			--i;
-		}else if(reason(var(cl[i]))!=CRef_Undef){
-			const Clause& expl = ca[reason(var(cl[i]))];
-			bool allSeen = true;
-			for(int j=0; j<expl.size(); ++j){
-				int var_j = var(expl[j]);
-				if(level(var_j)!=0 && !seen[var_j]){
-					allSeen = false;
-					break;
-				}
-			}
-			if(allSeen){
-				cl.swapErase(i);
-				--i;
-			}
-		}
-	}
-	for(int i=0; i<minimizeTmpVec.size(); ++i){ // reset seen
-		seen[minimizeTmpVec[i]]=0;
-	}
+    return;
+    vec<int> minimizeTmpVec;
+    vec<Lit> copyCl;
+    copyCl.growTo(cl.size());
+    minimizeTmpVec.growTo(cl.size());
+    for(int i=0; i<cl.size(); ++i){
+        copyCl[i] = cl[i];
+        int vcli = var(cl[i]);
+        minimizeTmpVec[i]=vcli;
+        assert(seen[vcli]==0);
+        seen[vcli]=1; // mark as seen
+    }
+
+    bool isSymmetry = false;
+    for(int i=0; i<cl.size() && cl.size()>1; ++i) {
+        if(value(cl[i])!=l_False){
+            continue;
+        }
+        if(level(var(cl[i]))==0){
+            if (forbid_units.find(~cl[i]) != forbid_units.end()) {
+                isSymmetry = true;
+                break;
+            }
+            cl.swapErase(i);
+            --i;
+        }else if(reason(var(cl[i]))!=CRef_Undef){
+            const Clause& expl = ca[reason(var(cl[i]))];
+            bool allSeen = true;
+            for(int j=0; j<expl.size(); ++j){
+                int var_j = var(expl[j]);
+                if (forbid_units.find(~expl[j]) != forbid_units.end()) {
+                    isSymmetry = true;
+                    break;
+                }
+
+                if(level(var_j)!=0 && !seen[var_j]){
+                    allSeen = false;
+                    break;
+                }
+            }
+            if(allSeen) {
+                if (expl.symmetry()) {
+                    isSymmetry = true;
+                    break;
+                }
+
+                cl.swapErase(i);
+                --i;
+            }
+        }
+    }
+    for(int i=0; i<minimizeTmpVec.size(); ++i){ // reset seen
+        seen[minimizeTmpVec[i]]=0;
+    }
+
+    if (isSymmetry) {
+        cl.clear();
+        cl.growTo(copyCl.size());
+        for (int i=0; i<copyCl.size() ; i++) {
+            cl[i] = copyCl[i];
+        }
+    }
 }
+// void Solver::minimizeClause(vec<Lit>& cl){
+//     return; // debug
+// 	vec<int> minimizeTmpVec;
+// 	minimizeTmpVec.growTo(cl.size());
+// 	for(int i=0; i<cl.size(); ++i){
+// 		int vcli = var(cl[i]);
+// 		minimizeTmpVec[i]=vcli;
+// 		assert(seen[vcli]==0);
+// 		seen[vcli]=1; // mark as seen
+// 	}
+// 	for(int i=0; i<cl.size() && cl.size()>1; ++i){
+// 		if(value(cl[i])!=l_False){
+// 			continue;
+// 		}
+// 		if(level(var(cl[i]))==0){
+// 			cl.swapErase(i);
+// 			--i;
+// 		}else if(reason(var(cl[i]))!=CRef_Undef){
+// 			const Clause& expl = ca[reason(var(cl[i]))];
+// 			bool allSeen = true;
+// 			for(int j=0; j<expl.size(); ++j){
+// 				int var_j = var(expl[j]);
+// 				if(level(var_j)!=0 && !seen[var_j]){
+// 					allSeen = false;
+// 					break;
+// 				}
+// 			}
+// 			if(allSeen){
+// 				cl.swapErase(i);
+// 				--i;
+// 			}
+// 		}
+// 	}
+// 	for(int i=0; i<minimizeTmpVec.size(); ++i){ // reset seen
+// 		seen[minimizeTmpVec[i]]=0;
+// 	}
+// }
 
 // NOTE: sometimes backtracks to add unit clause instead of conflict clause
 CRef Solver::addClauseFromSymmetry(const Clause& original, vec<Lit>& symmetrical){
