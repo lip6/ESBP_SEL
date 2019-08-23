@@ -37,7 +37,7 @@ static DoubleOption  opt_var_decay         (_cat, "var-decay",   "The variable a
 static DoubleOption  opt_clause_decay      (_cat, "cla-decay",   "The clause activity decay factor",              0.999,    DoubleRange(0, false, 1, false));
 static DoubleOption  opt_random_var_freq   (_cat, "rnd-freq",    "The frequency with which the decision heuristic tries to choose a random variable", 0, DoubleRange(0, true, 1, true));
 static DoubleOption  opt_random_seed       (_cat, "rnd-seed",    "Used by the random variable selection",         91648253, DoubleRange(0, false, HUGE_VAL, false));
-static IntOption     opt_ccmin_mode        (_cat, "ccmin-mode",  "Controls conflict clause minimization (0=none, 1=basic, 2=deep)", 0, IntRange(0, 2));
+static IntOption     opt_ccmin_mode        (_cat, "ccmin-mode",  "Controls conflict clause minimization (0=none, 1=basic, 2=deep)", 2, IntRange(0, 2));
 static IntOption     opt_phase_saving      (_cat, "phase-saving", "Controls the level of phase saving (0=none, 1=limited, 2=full)", 2, IntRange(0, 2));
 static BoolOption    opt_rnd_init_act      (_cat, "rnd-init",    "Randomize the initial activity", false);
 static BoolOption    opt_luby_restart      (_cat, "luby",        "Use the Luby restart sequence", true);
@@ -625,10 +625,14 @@ void Solver::uncheckedEnqueue(Lit p, CRef from)
 
     if (decisionLevel() == 0 && from != CRef_Undef) {
         const Clause& c = ca[from];
-        for (int i=0; i<c.size(); i++) {
-            if (forbid_units.find(~c[i]) != forbid_units.end()) {
-                forbid_units.insert(p);
-                break;
+        if (c.symmetry()) {
+            forbid_units.insert(p);
+        } else {
+            for (int i=0; i<c.size(); i++) {
+                if (forbid_units.find(~c[i]) != forbid_units.end()) {
+                    forbid_units.insert(p);
+                    break;
+                }
             }
         }
     }
@@ -887,6 +891,7 @@ struct reduceDB_lt {
 };
 void Solver::reduceDB()
 {
+    return;
     int     i, j;
     double  extra_lim = cla_inc / learnts.size();    // Remove any clause below this activity
 
@@ -1018,6 +1023,15 @@ lbool Solver::search(int nof_conflicts)
     for (;;){
         CRef confl = propagate();
         if (confl != CRef_Undef){
+
+            const Clause& c = ca[confl];
+            for (int i=0; i<c.size(); i++) {
+                if (value(c[i]) != l_False) {
+                        std::cout << "== FATAL ERROR: False conflict " << std::endl;
+                        exit(1);
+                    }
+            }
+
             // CONFLICT
             conflicts++; conflictC++;
             if (decisionLevel() == 0) return l_False;
