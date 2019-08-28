@@ -492,8 +492,10 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool &o
         assert(level(var(l)) == 0);
         for (SymGenerator *g : *comp) {
             Lit image = g->getImage(l);
-            if (value(image) != value(l) || level(var(image)) != 0)
+
+            if (value(image) != value(l) || level(var(image)) != 0) {
                 to_remove.insert(g);
+            }
             // if (image != l)
             //     to_remove.insert(g);
         }
@@ -670,8 +672,10 @@ StartPropagate:
 	if (symmetry) {
 		symmetry->updateNotify(p);
 	        CRef cr = learntSymmetryClause(cosy::ClauseInjector::ESBP, p);
-                if (opt_stop_prop && cr != CRef_Undef) {
+                if (cr != CRef_Undef) {
+                    confl = cr;
                     qhead = trail.size();
+
                     return cr;
                 }
 	}
@@ -720,7 +724,7 @@ StartPropagate:
     }
 
 		vec<Lit> symmetrical;
-#if 1
+#if 0
 	/*** first check existing symmetrical clauses ***/
 		for(; confl == CRef_Undef && qhead_sel<trail.size(); ++qhead_sel){
 			Lit prop = trail[qhead_sel];
@@ -773,6 +777,9 @@ StartPropagate:
 
 				// create new learned clause
                                 const Clause& original = ca[reason(selProp[currentclause])];
+
+                                if (original.scompat() != nullptr)
+                                    assert(original.symmetry());
 
                                 if (original.symmetry() && original.scompat()->find(selGen[currentclause]) == original.scompat()->end())
                                     continue;
@@ -827,6 +834,9 @@ StartPropagate:
 			for(; watchidx<watchEnd-watchStart; ++watchidx){
 				SymGenerator* g = genWatches[watchStart+watchidx];
 				assert(g->permutes(currentGenLit));
+
+                                if (ca[reason_cgl].scompat() != nullptr)
+                                    assert(ca[reason_cgl].symmetry());
 
                                 if (ca[reason_cgl].symmetry() && ca[reason_cgl].scompat()->find(g) == ca[reason_cgl].scompat()->end())
                                     continue;
@@ -897,6 +907,7 @@ struct reduceDB_lt {
 };
 void Solver::reduceDB()
 {
+    return;
     int     i, j;
     double  extra_lim = cla_inc / learnts.size();    // Remove any clause below this activity
 
@@ -957,6 +968,7 @@ void Solver::rebuildOrderHeap()
 |________________________________________________________________________________________________@*/
 bool Solver::simplify()
 {
+    return true; // debug
     assert(decisionLevel() == 0);
 
     if (!ok || propagate() != CRef_Undef)
@@ -1050,32 +1062,36 @@ lbool Solver::search(int nof_conflicts)
                 uncheckedEnqueue(learnt_clause[0]);
                 Lit l = learnt_clause[0];
 
-                if (isSym) {
-                    for (SymGenerator* g : comp) {
-                        // TODO ADD WHOLE ORBITS
-                        if (g->permutes(l)) {
-                            Lit image = g->getImage(l);
-                            if (value(image) == l_Undef)
-                                uncheckedEnqueue(image);
-                            else if (value(image) == l_False) {
-                             std::cout << "UNSAT HERE" << std::endl;
-                             return l_False;
-                            }
-                        }
-                    }
-                } else {
-                    for (int i=0; i<generators.size(); i++) {
-                        SymGenerator * g = generators[i];
-                        // TODO ADD WHOLE ORBITS
-                        if (g->permutes(l)) {
-                            Lit image = g->getImage(l);
-                            if (value(image) == l_Undef)
-                                uncheckedEnqueue(image);
-                            else if (value(image) == l_False)
-                                return l_False;
-                        }
-                    }
-                }
+                // if (isSym) {
+                //     for (SymGenerator* g : comp) {
+                //         // TODO ADD WHOLE ORBITS
+                //         if (g->permutes(l)) {
+                //             Lit image = g->getImage(l);
+                //             if (value(image) == l_Undef) {
+                //                 assert(false);
+                //                 uncheckedEnqueue(image);
+                //             }
+                //             else if (value(image) == l_False) {
+                //              std::cout << "UNSAT HERE" << std::endl;
+                //              return l_False;
+                //             }
+                //         }
+                //     }
+                // } else {
+                //     for (int i=0; i<generators.size(); i++) {
+                //         SymGenerator * g = generators[i];
+                //         // TODO ADD WHOLE ORBITS
+                //         if (g->permutes(l)) {
+                //             Lit image = g->getImage(l);
+                //             if (value(image) == l_Undef) {
+                //                 assert(false);
+                //                 uncheckedEnqueue(image);
+                //             }
+                //             else if (value(image) == l_False)
+                //                 return l_False;
+                //         }
+                //     }
+                // }
             }else{
                 std::set<SymGenerator*>* valid = isSym ? new std::set<SymGenerator*>(comp.begin(), comp.end()) : nullptr;
                 if (isSym)
@@ -1670,7 +1686,7 @@ CRef Solver::learntSymmetryClause(cosy::ClauseInjector::Type type, Lit p) {
         if (symmetry->hasClauseToInject(type, p)) {
             std::vector<Lit> vsbp = symmetry->clauseToInject(type, p);
 
-
+            assert(decisionLevel() > 0);
             vec<Lit> sbp;
             int max_i = 0;
             int lvl = level(var(vsbp[max_i]));
