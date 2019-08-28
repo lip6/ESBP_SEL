@@ -57,6 +57,7 @@ Solver::Solver() :
     //
     symmetry(nullptr)
   , adapter(nullptr)
+  , all_generators(nullptr)
   , verbosity        (0)
   , var_decay        (opt_var_decay)
   , clause_decay     (opt_clause_decay)
@@ -344,7 +345,6 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool &o
     std::vector<std::set<SymGenerator*>*> symmetries;
     std::set<Lit> units;
 
-    outSym = false;
 
     // Generate conflict clause:
     //
@@ -359,7 +359,6 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool &o
             claBumpActivity(c);
 
         if (c.symmetry()) {
-            outSym = true;
             assert(ca[confl].scompat() != nullptr);
             symmetries.push_back(ca[confl].scompat());
         }
@@ -367,9 +366,8 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool &o
         for (int j = (p == lit_Undef) ? 0 : 1; j < c.size(); j++){
             Lit q = c[j];
 
-            if (level(var(q)) == 0 && (forbid_units.find(~q) != forbid_units.end())) {
+            if (level(var(q)) == 0) {
                 units.insert(q);
-                outSym = true;
             }
 
             if (!seen[var(q)] && level(var(q)) > 0){
@@ -398,7 +396,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool &o
     out_learnt.copyTo(analyze_toclear);
     if (ccmin_mode == 2){
         for (i = j = 1; i < out_learnt.size(); i++)
-            if (reason(var(out_learnt[i])) == CRef_Undef || !litRedundant(out_learnt[i]))
+            if (reason(var(out_learnt[i])) == CRef_Undef || !litRedundant(out_learnt[i], symmetries, units))
                 out_learnt[j++] = out_learnt[i];
 
     }else if (ccmin_mode == 1){
@@ -441,8 +439,23 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool &o
 
     for (int j = 0; j < analyze_toclear.size(); j++) seen[var(analyze_toclear[j])] = 0;    // ('seen[]' is now cleared)
 
-     if (!outSym)
+
+    outSym = symmetries.size() > 0 ;
+
+    if (!outSym && units.empty())
         return;
+
+    if (!outSym) {
+
+        if (all_generators == nullptr) {
+            all_generators = new std::set<SymGenerator*>();
+            for (int i=0; i<generators.size(); i++)
+                all_generators->insert(generators[i]);
+        }
+        symmetries.push_back(all_generators);
+        outSym = true;
+    }
+
 
     comp->clear();
     for (std::set<SymGenerator*>* check : symmetries) {
@@ -502,7 +515,7 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool &o
 
 
 // Check if 'p' can be removed from a conflict clause.
-bool Solver::litRedundant(Lit p)
+bool Solver::litRedundant(Lit p, std::vector<std::set<SymGenerator*>*>& symmetries, std::set<Lit>& units)
 {
     enum { seen_undef = 0, seen_source = 1, seen_removable = 2, seen_failed = 3 };
     assert(seen[var(p)] == seen_undef || seen[var(p)] == seen_source);
@@ -512,18 +525,19 @@ bool Solver::litRedundant(Lit p)
     vec<ShrinkStackElem>& stack = analyze_stack;
     stack.clear();
 
-    bool isSym = false;
+    std::vector<std::set<SymGenerator*>*> lsymmetries;
+    std::set<Lit> lunits;
 
     if (c->symmetry())
-        isSym = true;
+        lsymmetries.push_back(c->scompat());
 
     for (uint32_t i = 1; ; i++){
         if (i < (uint32_t)c->size()){
             // Checking 'p'-parents 'l':
             Lit l = (*c)[i];
 
-            if (forbid_units.find(~l) != forbid_units.end())
-                isSym = true;
+            if (level(var(l)) == 0)
+                lunits.insert(l);
 
             // Variable at level 0 or previously removable:
             if (level(var(l)) == 0 || seen[var(l)] == seen_source || seen[var(l)] == seen_removable){
@@ -549,7 +563,7 @@ bool Solver::litRedundant(Lit p)
             c  = &ca[reason(var(p))];
 
             if (c->symmetry())
-                isSym = true;
+                lsymmetries.push_back(c->scompat());
 
         }else{
             // Finished with current element 'p' and reason 'c':
@@ -567,13 +581,19 @@ bool Solver::litRedundant(Lit p)
             c  = &ca[reason(var(p))];
 
             if (c->symmetry())
-                isSym = true;
+                lsymmetries.push_back(c->scompat());
 
             stack.pop();
         }
     }
 
-    return !isSym;
+    for (Lit unit : lunits)
+        units.insert(unit);
+
+    for (auto e : lsymmetries)
+        symmetries.push_back(e);
+
+    return true;
 }
 
 
@@ -622,20 +642,6 @@ void Solver::uncheckedEnqueue(Lit p, CRef from)
     assigns[var(p)] = lbool(!sign(p));
     vardata[var(p)] = mkVarData(from, decisionLevel());
     trail.push_(p);
-
-    if (decisionLevel() == 0 && from != CRef_Undef) {
-        const Clause& c = ca[from];
-        if (c.symmetry()) {
-            forbid_units.insert(p);
-        } else {
-            for (int i=0; i<c.size(); i++) {
-                if (forbid_units.find(~c[i]) != forbid_units.end()) {
-                    forbid_units.insert(p);
-                    break;
-                }
-            }
-        }
-    }
 }
 
 
@@ -891,7 +897,6 @@ struct reduceDB_lt {
 };
 void Solver::reduceDB()
 {
-    return;
     int     i, j;
     double  extra_lim = cla_inc / learnts.size();    // Remove any clause below this activity
 
@@ -1046,8 +1051,6 @@ lbool Solver::search(int nof_conflicts)
                 Lit l = learnt_clause[0];
 
                 if (isSym) {
-                    forbid_units.insert(l);
-
                     for (SymGenerator* g : comp) {
                         // TODO ADD WHOLE ORBITS
                         if (g->permutes(l)) {
@@ -1219,7 +1222,7 @@ lbool Solver::solve_()
     solves++;
  // Set symmetry order
     if (symmetry != nullptr) {
-        symmetry->enableCosy(cosy::OrderMode::AUTO,
+        symmetry->enableCosy(cosy::OrderMode::OCCURENCE,
                              cosy::ValueMode::TRUE_LESS_FALSE
                              // FALSE_LESS_TRUE
                              );
@@ -1233,7 +1236,7 @@ lbool Solver::solve_()
             std::vector<Lit> literals = symmetry->clauseToInject(type);
             assert(literals.size() == 1);
             Lit l = literals[0];
-            forbid_units.insert(l);
+            // TODO LOOK HERE
             if (value(l) == l_Undef)
                 uncheckedEnqueue(l);
 
@@ -1531,10 +1534,6 @@ void Solver::minimizeClause(vec<Lit>& cl){
             continue;
         }
         if(level(var(cl[i]))==0){
-            if (forbid_units.find(~cl[i]) != forbid_units.end()) {
-                isSymmetry = true;
-                break;
-            }
             cl.swapErase(i);
             --i;
         }else if(reason(var(cl[i]))!=CRef_Undef){
@@ -1542,10 +1541,6 @@ void Solver::minimizeClause(vec<Lit>& cl){
             bool allSeen = true;
             for(int j=0; j<expl.size(); ++j){
                 int var_j = var(expl[j]);
-                if (forbid_units.find(~expl[j]) != forbid_units.end()) {
-                    isSymmetry = true;
-                    break;
-                }
 
                 if(level(var_j)!=0 && !seen[var_j]){
                     allSeen = false;

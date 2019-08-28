@@ -109,7 +109,8 @@ public:
     // Symmetry
     std::unique_ptr<cosy::SymmetryController<Lit>> symmetry;
     std::unique_ptr<cosy::LiteralAdapter<Minisat::Lit>> adapter;
-    std::set<Lit> forbid_units;
+
+    std::set<SymGenerator*>* all_generators;
 
     CRef learntSymmetryClause(cosy::ClauseInjector::Type type, Lit p);
     void notifyCNFUnits();
@@ -287,7 +288,7 @@ protected:
     void     cancelUntil      (int level);                                             // Backtrack until a certain level.
     void     analyze          (CRef confl, vec<Lit>& out_learnt, int& out_btlevel, bool &outSym, std::set<SymGenerator*>* comp);    // (bt = backtrack)
     void     analyzeFinal     (Lit p, LSet& out_conflict);                             // COULD THIS BE IMPLEMENTED BY THE ORDINARIY "analyze" BY SOME REASONABLE GENERALIZATION?
-    bool     litRedundant     (Lit p);                                                 // (helper method for 'analyze()')
+    bool     litRedundant     (Lit p, std::vector<std::set<SymGenerator*>*>& symmetries, std::set<Lit>& units);                                                 // (helper method for 'analyze()')
     lbool    search           (int nof_conflicts);                                     // Search for a given number of conflicts.
     lbool    solve_           ();                                                      // Main solve method (assumptions given in 'assumptions').
     void     reduceDB         ();                                                      // Reduce the set of learnt clauses.
