@@ -1052,8 +1052,10 @@ lbool Solver::search(int nof_conflicts)
                         // TODO ADD WHOLE ORBITS
                         if (g->permutes(l)) {
                             Lit image = g->getImage(l);
-                            if (value(image) == l_Undef)
+                            if (value(image) == l_Undef) {
                                 uncheckedEnqueue(image);
+                                forbid_units.insert(image);
+                            }
                             else if (value(image) == l_False) {
                              std::cout << "UNSAT HERE" << std::endl;
                              return l_False;

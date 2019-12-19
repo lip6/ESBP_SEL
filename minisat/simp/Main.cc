@@ -80,7 +80,7 @@ int main(int argc, char** argv)
         SimpSolver  S;
         double      initial_time = cpuTime();
 
-        if (!pre) S.eliminate(true);
+        //if (!pre) S.eliminate(true);
 
         S.verbosity = verb;
 
